@@ -1190,6 +1190,7 @@
 		D96290010000000000000001 /* CodexResumeBindingVerificationRegressionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D96290020000000000000001 /* CodexResumeBindingVerificationRegressionTests.swift */; };
 		C8711C000000000000000002 /* CodexRolloutIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8711C000000000000000001 /* CodexRolloutIdentity.swift */; };
 		C8711D000000000000000002 /* CodexRolloutIdentityResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8711D000000000000000001 /* CodexRolloutIdentityResolver.swift */; };
+		D92C0D010000000000000001 /* CodexTabTitleSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = D92C0D020000000000000001 /* CodexTabTitleSync.swift */; };
 		C0DECAFE0000000000000001 /* CodexTeamsApprovalBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DECAFE0000000000000002 /* CodexTeamsApprovalBridge.swift */; };
 		C0DECAFE0000000000000003 /* CodexTeamsApprovalBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DECAFE0000000000000002 /* CodexTeamsApprovalBridge.swift */; };
 		C0DEBACC0000000000000001 /* CodexTeamsAppServerFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEBACC0000000000000004 /* CodexTeamsAppServerFixture.swift */; };
@@ -4653,6 +4654,7 @@
 		D96290020000000000000001 /* CodexResumeBindingVerificationRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexResumeBindingVerificationRegressionTests.swift; sourceTree = "<group>"; };
 		C8711C000000000000000001 /* CodexRolloutIdentity.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodexRolloutIdentity.swift; sourceTree = "<group>"; };
 		C8711D000000000000000001 /* CodexRolloutIdentityResolver.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CodexRolloutIdentityResolver.swift; sourceTree = "<group>"; };
+		D92C0D020000000000000001 /* CodexTabTitleSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CodexTabTitleSync.swift"; sourceTree = "<group>"; };
 		C0DECAFE0000000000000002 /* CodexTeamsApprovalBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexTeamsApprovalBridge.swift; sourceTree = "<group>"; };
 		C0DEBACC0000000000000004 /* CodexTeamsAppServerFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexTeamsAppServerFixture.swift; sourceTree = "<group>"; };
 		A10240020000000000000001 /* CodexTeamsAppServerProcess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexTeamsAppServerProcess.swift; sourceTree = "<group>"; };
@@ -8083,6 +8085,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				6BAC6DCC5DA64C5FBA16A6AD /* DockSplitStore+AgentResumeOwnership.swift */,
 				5F89ED4F392842F08A685C41 /* Workspace+AgentResumeOwnership.swift */,
 				C3744E020000000000000001 /* Workspace+PanelLifecycle.swift */,
+				D92C0D020000000000000001 /* CodexTabTitleSync.swift */,
 				C3744E100000000000000002 /* Workspace+SidebarStatusVisibility.swift */,
 				A6AC73020000000000000002 /* Workspace+AgentLifecycle.swift */,
 				D4A9923A0000000000000002 /* TerminalStartupRestoreCoordinator.swift */,
@@ -11725,6 +11728,7 @@ B8B056D80000000000000002 /* MobileHostIdentityTests.swift */ = {isa = PBXFileRef
 				A9E02000000000000000000E /* CodexAppServerSession.swift in Sources */,
 					C8711C000000000000000002 /* CodexRolloutIdentity.swift in Sources */,
 					C8711D000000000000000002 /* CodexRolloutIdentityResolver.swift in Sources */,
+				D92C0D010000000000000001 /* CodexTabTitleSync.swift in Sources */,
 				A10240030000000000000001 /* CodexTeamsAppServerProcess.swift in Sources */,
 				A10240100000000000000001 /* CodexTeamsPOSIXSupport.swift in Sources */,
 				C4041001000000000000001B /* CommandClickFileOpenRouter.swift in Sources */,

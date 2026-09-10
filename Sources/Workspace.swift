@@ -2991,6 +2991,7 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     /// An entry may be absent for a title carried across panel moves or
     /// restored from older snapshots; absent provenance is treated as `.user`.
     var panelCustomTitleSources: [UUID: CustomTitleSource] = [:]
+    var codexTitleSyncs: [UUID: CodexTabTitleSync] = [:]
     @Published var pinnedPanelIds: Set<UUID> = []
     var pinMutationTokensByPanelId: [UUID: UUID] = [:]
     let panelUnread = WorkspacePanelUnreadModel()
@@ -5460,7 +5461,9 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         }
         let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let previous = panelCustomTitles[panelId]
+        if source == .user, codexTitleSyncs[panelId]?.isApplyingSessionName != true { codexTitleSyncs[panelId]?.rename(trimmed) }
         if source == .auto {
+            if let sync = codexTitleSyncs[panelId], !sync.isApplyingSessionName { return false }
             guard !trimmed.isEmpty else { return false }
             if previous != nil, (panelCustomTitleSources[panelId] ?? .user) != .auto { return false }
         }

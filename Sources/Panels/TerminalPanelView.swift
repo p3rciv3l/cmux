@@ -246,7 +246,7 @@ private func terminalViewportFormat(_ value: CGFloat) -> String {
 #endif
 
 /// Shared appearance settings for panels
-struct PanelAppearance {
+struct PanelAppearance: Hashable {
     let backgroundColor: NSColor
     let foregroundColor: NSColor
     let dividerColor: Color

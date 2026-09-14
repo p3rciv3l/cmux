@@ -1,4 +1,5 @@
 import XCTest
+import Bonsplit
 
 #if canImport(cmux_DEV)
 @testable import cmux_DEV
@@ -8,6 +9,106 @@ import XCTest
 
 @MainActor
 final class AppDelegateMoveTabToNewWorkspaceTests: XCTestCase {
+    func testMoveSurfaceToAdjacentPaneDoesNotCreateTemporarySurface() throws {
+        let app = AppDelegate()
+        let windowId = UUID()
+        let manager = TabManager()
+        app.registerMainWindowContextForTesting(windowId: windowId, tabManager: manager)
+        defer { app.unregisterMainWindowContextForTesting(windowId: windowId) }
+
+        let workspace = try XCTUnwrap(manager.selectedWorkspace)
+        let movedPanelId = try XCTUnwrap(workspace.focusedTerminalPanel?.id)
+        let neighborPanel = try XCTUnwrap(
+            workspace.newTerminalSplit(
+                from: movedPanelId,
+                orientation: .horizontal,
+                insertFirst: false,
+                focus: false
+            )
+        )
+        let neighborPane = try XCTUnwrap(workspace.paneId(forPanelId: neighborPanel.id))
+        workspace.focusPanel(movedPanelId)
+        let panelCountBefore = workspace.panels.count
+
+        XCTAssertTrue(app.moveSurfaceToNeighborOrSplit(
+            panelId: movedPanelId,
+            workspace: workspace,
+            direction: .right,
+            focus: true,
+            focusWindow: false
+        ))
+
+        XCTAssertEqual(workspace.panels.count, panelCountBefore)
+        XCTAssertEqual(workspace.paneId(forPanelId: movedPanelId), neighborPane)
+        XCTAssertEqual(workspace.focusedPanelId, movedPanelId)
+        XCTAssertTrue(workspace.panels[neighborPanel.id] is TerminalPanel)
+    }
+
+    func testMoveSurfaceToSplitWithoutNeighborDoesNotCreateTemporarySurfaceWhenSourcePaneHasOtherTabs() throws {
+        let app = AppDelegate()
+        let windowId = UUID()
+        let manager = TabManager()
+        app.registerMainWindowContextForTesting(windowId: windowId, tabManager: manager)
+        defer { app.unregisterMainWindowContextForTesting(windowId: windowId) }
+
+        let workspace = try XCTUnwrap(manager.selectedWorkspace)
+        let sourcePane = try XCTUnwrap(workspace.bonsplitController.focusedPaneId)
+        let remainingPanelId = try XCTUnwrap(workspace.focusedTerminalPanel?.id)
+        let remainingSurfaceId = try XCTUnwrap(workspace.surfaceIdFromPanelId(remainingPanelId))
+        let movedPanel = try XCTUnwrap(workspace.newTerminalSurface(inPane: sourcePane, focus: true))
+        let movedSurfaceId = try XCTUnwrap(workspace.surfaceIdFromPanelId(movedPanel.id))
+        let panelCountBefore = workspace.panels.count
+
+        XCTAssertTrue(app.moveSurfaceToNeighborOrSplit(
+            panelId: movedPanel.id,
+            workspace: workspace,
+            direction: .right,
+            focus: true,
+            focusWindow: false
+        ))
+
+        XCTAssertEqual(workspace.panels.count, panelCountBefore)
+        XCTAssertEqual(workspace.bonsplitController.allPaneIds.count, 2)
+        XCTAssertNotEqual(workspace.paneId(forPanelId: movedPanel.id), sourcePane)
+        XCTAssertEqual(workspace.focusedPanelId, movedPanel.id)
+        XCTAssertTrue(workspace.bonsplitController.tabs(inPane: sourcePane).contains { $0.id == remainingSurfaceId })
+        let movedPane = try XCTUnwrap(workspace.paneId(forPanelId: movedPanel.id))
+        XCTAssertTrue(workspace.bonsplitController.tabs(inPane: movedPane).contains { $0.id == movedSurfaceId })
+    }
+
+    func testMoveOnlySurfaceToSplitCreatesSingleReplacementAndKeepsOriginalFocused() throws {
+        let app = AppDelegate()
+        let windowId = UUID()
+        let manager = TabManager()
+        app.registerMainWindowContextForTesting(windowId: windowId, tabManager: manager)
+        defer { app.unregisterMainWindowContextForTesting(windowId: windowId) }
+
+        let workspace = try XCTUnwrap(manager.selectedWorkspace)
+        let movedPanelId = try XCTUnwrap(workspace.focusedTerminalPanel?.id)
+        let sourcePane = try XCTUnwrap(workspace.paneId(forPanelId: movedPanelId))
+
+        XCTAssertTrue(app.moveSurfaceToNeighborOrSplit(
+            panelId: movedPanelId,
+            workspace: workspace,
+            direction: .right,
+            focus: true,
+            focusWindow: false
+        ))
+
+        XCTAssertEqual(workspace.panels.count, 2)
+        XCTAssertEqual(workspace.bonsplitController.allPaneIds.count, 2)
+        XCTAssertEqual(workspace.focusedPanelId, movedPanelId)
+        let movedPane = try XCTUnwrap(workspace.paneId(forPanelId: movedPanelId))
+        XCTAssertNotEqual(movedPane, sourcePane)
+        XCTAssertNotNil(workspace.bonsplitController.adjacentPane(to: movedPane, direction: .left))
+        let sourceTabs = workspace.bonsplitController.tabs(inPane: sourcePane)
+        XCTAssertEqual(sourceTabs.count, 1)
+        let replacementSurfaceId = try XCTUnwrap(sourceTabs.first?.id)
+        let replacementPanelId = try XCTUnwrap(workspace.panelIdFromSurfaceId(replacementSurfaceId))
+        XCTAssertNotEqual(replacementPanelId, movedPanelId)
+        XCTAssertTrue(workspace.panels[replacementPanelId] is TerminalPanel)
+    }
+
     func testMoveSurfaceToNewWorkspaceCreatesSinglePanelWorkspaceFromPanelTitle() throws {
         let app = AppDelegate()
         let windowId = UUID()

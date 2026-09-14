@@ -3,6 +3,7 @@ import AppKit
 import Carbon.HIToolbox
 import Combine
 import SwiftUI
+@testable import CmuxSettingsUI
 
 #if canImport(cmux_DEV)
 @testable import cmux_DEV
@@ -2388,6 +2389,126 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
 #else
             XCTFail("debugHandleShortcutMonitorEvent is only available in DEBUG")
 #endif
+        }
+    }
+
+    func testGhosttyConfigDoesNotRetainNumberedGotoTabFallback() throws {
+        // Regression for https://github.com/manaflow-ai/cmux/issues/5189.
+        // cmux owns "Select Workspace 1…9" (default ⌘1–9) through KeyboardShortcutSettings.
+        // Ghostty's built-in super+1…8 = goto_tab and super+9 = last_tab fallbacks must be
+        // unbound — exactly like cmux already unbinds super+d / super+w — so the numbered
+        // shortcut is driven solely by the configured value. Otherwise a remapped-away ⌘1–9
+        // still reaches the focused terminal and switches "tabs", making the rebind look
+        // hardcoded.
+        guard let ghosttyConfig = GhosttyApp.shared.config else {
+            XCTFail("Expected loaded Ghostty config")
+            return
+        }
+
+        let digitKeyCodes: [(String, UInt32)] = [
+            ("1", UInt32(kVK_ANSI_1)),
+            ("2", UInt32(kVK_ANSI_2)),
+            ("3", UInt32(kVK_ANSI_3)),
+            ("4", UInt32(kVK_ANSI_4)),
+            ("5", UInt32(kVK_ANSI_5)),
+            ("6", UInt32(kVK_ANSI_6)),
+            ("7", UInt32(kVK_ANSI_7)),
+            ("8", UInt32(kVK_ANSI_8)),
+            ("9", UInt32(kVK_ANSI_9)),
+        ]
+
+        for (digit, keyCode) in digitKeyCodes {
+            XCTAssertFalse(
+                ghosttyConfigKeyIsBinding(
+                    ghosttyConfig,
+                    key: digit,
+                    modifiers: [.command],
+                    keyCode: keyCode
+                ),
+                "Ghostty must not retain its super+\(digit) goto_tab/last_tab fallback; the numbered workspace shortcut is owned by KeyboardShortcutSettings"
+            )
+        }
+    }
+
+    func testRebindingSelectWorkspaceByNumberHonorsNewModifierAndDropsDefault() {
+        // Companion to testGhosttyConfigDoesNotRetainNumberedGotoTabFallback (#5189):
+        // the cmux routing layer must drive the numbered shortcut from the configured
+        // value, so a rebound modifier selects the workspace and the old ⌘ default no
+        // longer routes through cmux.
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let mainWindow = window(withId: windowId) else {
+            XCTFail("Expected window context")
+            return
+        }
+
+        // Need at least two workspaces so a digit-1 selection is observable.
+        _ = manager.addTab(select: true)
+        _ = manager.addTab(select: true)
+        guard manager.tabs.count >= 2,
+              let firstTabId = manager.tabs.first?.id else {
+            XCTFail("Expected at least two workspaces")
+            return
+        }
+        manager.selectTab(at: manager.tabs.count - 1)
+        appDelegate.tabManager = manager
+        let selectionBeforeStaleDefault = manager.selectedTabId
+        XCTAssertNotEqual(selectionBeforeStaleDefault, firstTabId, "Expected a non-first workspace selected before the digit press")
+
+        let rebound = StoredShortcut(key: "1", command: false, shift: false, option: true, control: true)
+        withTemporaryShortcut(action: .selectWorkspaceByNumber, shortcut: rebound) {
+            guard let staleCmd1 = makeKeyDownEvent(
+                key: "1",
+                modifiers: [.command],
+                keyCode: UInt16(kVK_ANSI_1),
+                windowNumber: mainWindow.windowNumber
+            ) else {
+                XCTFail("Failed to construct Cmd+1 event")
+                return
+            }
+#if DEBUG
+            XCTAssertFalse(
+                appDelegate.debugHandleCustomShortcut(event: staleCmd1),
+                "After rebinding Select Workspace 1…9, the old ⌘1 must not be routed by cmux"
+            )
+#else
+            XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+            XCTAssertEqual(
+                manager.selectedTabId,
+                selectionBeforeStaleDefault,
+                "⌘1 must not change workspace selection after the shortcut is rebound away from ⌘"
+            )
+
+            guard let reboundEvent = makeKeyDownEvent(
+                key: "1",
+                modifiers: [.control, .option],
+                keyCode: UInt16(kVK_ANSI_1),
+                windowNumber: mainWindow.windowNumber
+            ) else {
+                XCTFail("Failed to construct Ctrl+Option+1 event")
+                return
+            }
+#if DEBUG
+            XCTAssertTrue(
+                appDelegate.debugHandleCustomShortcut(event: reboundEvent),
+                "The rebound Ctrl+Option+1 shortcut should be routed by cmux"
+            )
+#else
+            XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+            XCTAssertEqual(
+                manager.selectedTabId,
+                firstTabId,
+                "Ctrl+Option+1 should select the first workspace after the rebind"
+            )
         }
     }
 
@@ -5634,6 +5755,53 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         #endif
     }
 
+    func testBrowserCommandShortcutRoutingRecognizesBrowserFirstCommands() {
+        let cases: [(name: String, modifiers: NSEvent.ModifierFlags, chars: String, keyCode: UInt16)] = [
+            ("cmd-a", [.command], "a", 0),
+            ("cmd-c", [.command], "c", 8),
+            ("cmd-x", [.command], "x", 7),
+        ]
+
+        for testCase in cases {
+            let event = makeKeyEvent(
+                modifierFlags: testCase.modifiers,
+                characters: testCase.chars,
+                charactersIgnoringModifiers: testCase.chars,
+                keyCode: testCase.keyCode
+            )
+
+            XCTAssertTrue(
+                shouldRouteBrowserCommandEquivalentThroughWebContentFirst(event),
+                "Expected browser-first routing for \(testCase.name)"
+            )
+        }
+    }
+
+    func testBrowserCommandShortcutRoutingExcludesOtherCmuxCommands() {
+        let cases: [(name: String, modifiers: NSEvent.ModifierFlags, chars: String, keyCode: UInt16)] = [
+            ("cmd-l", [.command], "l", 37),
+            ("cmd-n", [.command], "n", 45),
+            ("cmd-t", [.command], "t", 17),
+            ("cmd-w", [.command], "w", 13),
+            ("cmd-d", [.command], "d", 2),
+            ("cmd-i", [.command], "i", 34),
+        ]
+
+        for testCase in cases {
+            let event = makeKeyEvent(
+                modifierFlags: testCase.modifiers,
+                characters: testCase.chars,
+                charactersIgnoringModifiers: testCase.chars,
+                keyCode: testCase.keyCode
+            )
+
+            XCTAssertFalse(
+                shouldRouteBrowserCommandEquivalentThroughWebContentFirst(event),
+                "Did not expect browser-first routing for \(testCase.name)"
+            )
+        }
+    }
+
     // MARK: - Browser find shortcut routing tests
 
     func testBrowserFirstFindShortcutRoutingRecognizesBrowserLocalFindCommandFamily() {
@@ -5761,9 +5929,76 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         }
     }
 
+    func testInlineVSCodeCommandPaletteShortcutRoutesThroughWebContentForTrackedServeWebOrigin() {
+        let event = makeKeyEvent(
+            modifierFlags: [.command, .shift],
+            characters: "P",
+            charactersIgnoringModifiers: "p",
+            keyCode: 35
+        )
+        let pageURL = URL(string: "http://127.0.0.1:63266/?folder=%2FUsers%2Ftester%2Fproject")!
+
+        XCTAssertTrue(
+            shouldRouteInlineVSCodeCommandPaletteShortcutThroughWebContentFirst(
+                event,
+                pageURL: pageURL,
+                inlineVSCodeURLMatcher: { $0 == pageURL },
+                shortcutForAction: { action in
+                    XCTAssertEqual(action, .commandPalette)
+                    return StoredShortcut(key: "p", command: true, shift: true, option: false, control: false, keyCode: 35)
+                }
+            ),
+            "Expected Cmd+Shift+P to stay inside inline VS Code when the focused browser URL belongs to the live serve-web process"
+        )
+    }
+
+    func testInlineVSCodeCommandPaletteShortcutDoesNotRouteForUntrackedLocalhostPage() {
+        let event = makeKeyEvent(
+            modifierFlags: [.command, .shift],
+            characters: "P",
+            charactersIgnoringModifiers: "p",
+            keyCode: 35
+        )
+        let pageURL = URL(string: "http://127.0.0.1:3000/?folder=%2FUsers%2Ftester%2Fproject")!
+
+        XCTAssertFalse(
+            shouldRouteInlineVSCodeCommandPaletteShortcutThroughWebContentFirst(
+                event,
+                pageURL: pageURL,
+                inlineVSCodeURLMatcher: { _ in false },
+                shortcutForAction: { _ in
+                    StoredShortcut(key: "p", command: true, shift: true, option: false, control: false, keyCode: 35)
+                }
+            ),
+            "A localhost page with a folder query must not steal cmux's command palette shortcut unless it is the tracked VS Code serve-web origin"
+        )
+    }
+
+    func testInlineVSCodeCommandPaletteShortcutDoesNotRouteUnrelatedShortcut() {
+        let event = makeKeyEvent(
+            modifierFlags: [.command],
+            characters: "l",
+            charactersIgnoringModifiers: "l",
+            keyCode: 37
+        )
+        let pageURL = URL(string: "http://127.0.0.1:63266/?folder=%2FUsers%2Ftester%2Fproject")!
+
+        XCTAssertFalse(
+            shouldRouteInlineVSCodeCommandPaletteShortcutThroughWebContentFirst(
+                event,
+                pageURL: pageURL,
+                inlineVSCodeURLMatcher: { $0 == pageURL },
+                shortcutForAction: { _ in
+                    StoredShortcut(key: "p", command: true, shift: true, option: false, control: false, keyCode: 35)
+                }
+            ),
+            "Only the configured command palette shortcut should bypass cmux for inline VS Code"
+        )
+    }
+
     // MARK: - Non-Latin keyboard layout shortcut tests
 
-    func testCmdTWorksWithRussianKeyboardLayout() {
+    func testCmdTNewSurfaceWorksWithRussianKeyboardLayout() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")
             return
@@ -5816,9 +6051,17 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         XCTAssertEqual(workspace.panels.count, surfaceCountBefore + 1, "Cmd+T should create a new surface with Russian keyboard layout")
     }
 
-    func testCmdTFallsBackToKeyCodeWithNonLatinLayoutWhenLayoutTranslationFails() {
+    func testCmdTNewSurfaceShortcutFallsBackToKeyCodeWithNonLatinLayoutWhenLayoutTranslationFails() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId) else {
+            XCTFail("Expected test window context")
             return
         }
 
@@ -5829,12 +6072,21 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
             appDelegate.shortcutLayoutCharacterProvider = KeyboardLayout.character(forKeyCode:modifierFlags:)
         }
 
-        let event = makeKeyEvent(
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
             modifierFlags: [.command],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
             characters: "",
             charactersIgnoringModifiers: "е", // Cyrillic е — non-ASCII
+            isARepeat: false,
             keyCode: 17 // kVK_ANSI_T
-        )
+        ) else {
+            XCTFail("Failed to construct non-Latin layout Cmd+T event")
+            return
+        }
 
 #if DEBUG
         XCTAssertTrue(
@@ -6608,6 +6860,45 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         )
         XCTAssertTrue(window.firstResponder === terminalView, "Terminal must be the only focused input endpoint")
         XCTAssertEqual(terminalPanel.captureFocusIntent(in: window), .terminal(.surface))
+    }
+
+    func testTextBoxConfiguredShortcutStandsDownWhilePackageRecorderIsActive() {
+        let focusTextBoxShortcut = StoredShortcut(
+            key: "a",
+            command: true,
+            shift: true,
+            option: false,
+            control: false,
+            keyCode: 0
+        )
+        guard let event = makeKeyDownEvent(
+            shortcut: focusTextBoxShortcut,
+            windowNumber: 0
+        ) else {
+            XCTFail("Failed to construct Cmd+Shift+A event")
+            return
+        }
+
+        let textBoxView = TextBoxInputTextView(frame: NSRect(x: 0, y: 0, width: 240, height: 30))
+        var toggleFocusCount = 0
+        textBoxView.onToggleFocus = { toggleFocusCount += 1 }
+
+        withTemporaryShortcut(action: .focusTextBoxInput, shortcut: focusTextBoxShortcut) {
+            XCTAssertTrue(textBoxView.performKeyEquivalent(with: event))
+            XCTAssertEqual(toggleFocusCount, 1)
+
+            let recorder = RecorderHostButton(frame: .zero)
+            defer {
+                if RecorderHostButton.isActivelyRecording {
+                    recorder.debugStopRecording()
+                }
+            }
+            recorder.debugStartRecording()
+
+            XCTAssertTrue(RecorderHostButton.isActivelyRecording)
+            XCTAssertFalse(textBoxView.performKeyEquivalent(with: event))
+            XCTAssertEqual(toggleFocusCount, 1)
+        }
     }
 
     func testTextBoxSecondEscapeDoesNotHideWhenAnotherResponderOwnsFocus() {
@@ -11513,7 +11804,7 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         XCTAssertFalse(harness.panel.isBrowserFocusModeExitArmed)
     }
 
-    func testBrowserFocusModeCommandEquivalentSkipsAppMenuFallback() {
+    func testBrowserFocusModeDoesNotClaimCommandEquivalents() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")
             return
@@ -11525,22 +11816,8 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
             harness.panel.setBrowserFocusModeActive(true, reason: "unit.commandEquivalent", focusWebView: false)
         )
 
-        let originalMainMenu = NSApp.mainMenu
-        let probe = MenuActionProbe()
-        let menu = NSMenu()
-        let item = NSMenuItem(title: "Find", action: #selector(MenuActionProbe.perform(_:)), keyEquivalent: "f")
-        item.keyEquivalentModifierMask = [.command]
-        item.target = probe
-        menu.addItem(item)
-        let returnItem = NSMenuItem(title: "Run", action: #selector(MenuActionProbe.perform(_:)), keyEquivalent: "\r")
-        returnItem.keyEquivalentModifierMask = [.command]
-        returnItem.target = probe
-        menu.addItem(returnItem)
-        NSApp.mainMenu = menu
-        defer { NSApp.mainMenu = originalMainMenu }
-
         guard let commandF = makeKeyDownEvent(key: "f", modifiers: [.command], keyCode: 3, windowNumber: harness.window.windowNumber),
-              let commandReturn = makeKeyDownEvent(key: "\r", modifiers: [.command], keyCode: 36, windowNumber: harness.window.windowNumber) else {
+              let commandS = makeKeyDownEvent(key: "s", modifiers: [.command], keyCode: 1, windowNumber: harness.window.windowNumber) else {
             XCTFail("Failed to construct browser focus mode command-equivalent events")
             return
         }
@@ -11550,11 +11827,19 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
 #else
         XCTFail("debugHandleCustomShortcut is only available in DEBUG")
 #endif
-        XCTAssertTrue(harness.webView.performKeyEquivalent(with: commandF))
-        XCTAssertEqual(probe.callCount, 0, "Focus mode must not replay unhandled page shortcuts into the app menu")
-        XCTAssertTrue(harness.webView.performKeyEquivalent(with: commandReturn))
-        XCTAssertEqual(probe.callCount, 0, "Focus mode must consume unhandled Cmd+Return instead of falling through to the app menu")
+        XCTAssertNil(harness.panel.searchState)
+        XCTAssertEqual(
+            appDelegate.handleBrowserFocusModeKeyEvent(commandS, webView: harness.webView, source: "unit.commandS"),
+            .inactive
+        )
         XCTAssertTrue(harness.panel.isBrowserFocusModeActive)
+
+        XCTAssertTrue(harness.webView.performKeyEquivalent(with: commandF))
+        XCTAssertNotNil(
+            harness.panel.searchState,
+            "Focus mode Cmd+F should open cmux browser find instead of swallowing the app-owned Find shortcut"
+        )
+        XCTAssertFalse(harness.panel.isBrowserFocusModeActive)
     }
 
     private func makeBrowserFocusModeHarness(

@@ -303,6 +303,26 @@ extension CMUXCLI {
         }
     }
 
+    func runThemeShortcut(
+        command: String,
+        commandArgs: [String],
+        jsonOutput: Bool,
+        socketPath: String,
+        explicitPassword: String?
+    ) throws {
+        guard commandArgs.isEmpty else {
+            throw CLIError(message: "Usage: cmux \(command)")
+        }
+
+        let theme = command == "light" ? "Gruvbox Light" : "Gruvbox Dark"
+        try runThemes(
+            commandArgs: ["set", theme],
+            jsonOutput: jsonOutput,
+            socketPath: socketPath,
+            explicitPassword: explicitPassword
+        )
+    }
+
     private func printThemesList(
         jsonOutput: Bool,
         targetBundleIdentifier: String

@@ -621,7 +621,7 @@ func cmuxIsWebInspectorObject(_ object: NSObject) -> Bool {
         cmuxIsWebInspectorClassName(NSStringFromClass(type(of: object)))
 }
 
-private enum BrowserDocumentEditingCommandEquivalent: CaseIterable {
+private enum BrowserWebContentCommandEquivalent: CaseIterable {
     case copy
     case cut
     case selectAll
@@ -686,20 +686,19 @@ private func browserFindCommandEquivalent(
     }
 }
 
-private func browserDocumentEditingCommandEquivalent(for event: NSEvent) -> BrowserDocumentEditingCommandEquivalent? {
-    BrowserDocumentEditingCommandEquivalent.allCases.first { command in
+private func browserWebContentCommandEquivalent(for event: NSEvent) -> BrowserWebContentCommandEquivalent? {
+    BrowserWebContentCommandEquivalent.allCases.first { command in
         command.shortcut.matches(event: event)
     }
 }
 
-/// For browser content, let the focused document/editor try native editing commands
-/// before cmux's menu fallback. Rich web apps often implement copy/cut/select-all
-/// in contentEditable handlers that AppKit's Edit menu path cannot reproduce.
-func shouldRouteBrowserDocumentEditingCommandEquivalentThroughWebContentFirst(
+/// For browser content, let WKWebView try a small set of document command
+/// equivalents before cmux's menu fallback.
+func shouldRouteBrowserCommandEquivalentThroughWebContentFirst(
     _ event: NSEvent,
     responder: NSResponder? = nil
 ) -> Bool {
-    guard browserDocumentEditingCommandEquivalent(for: event) != nil else {
+    guard browserWebContentCommandEquivalent(for: event) != nil else {
         return false
     }
 
@@ -745,6 +744,16 @@ func shouldRouteBrowserFindCommandEquivalentThroughWebContentFirst(
     }
 
     return true
+}
+
+func shouldRouteInlineVSCodeCommandPaletteShortcutThroughWebContentFirst(
+    _ event: NSEvent,
+    pageURL: URL?,
+    inlineVSCodeURLMatcher: (URL?) -> Bool = { VSCodeServeWebController.shared.isServeWebURL($0) },
+    shortcutForAction: (KeyboardShortcutSettings.Action) -> StoredShortcut = KeyboardShortcutSettings.shortcut(for:)
+) -> Bool {
+    guard inlineVSCodeURLMatcher(pageURL) else { return false }
+    return shortcutForAction(.commandPalette).matches(event: event)
 }
 
 func cmuxOwningGhosttyView(for responder: NSResponder?) -> GhosttyNSView? {

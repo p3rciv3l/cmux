@@ -2336,7 +2336,7 @@ final class TabManagerSurfaceCreationTests: XCTestCase {
         let afterPanels = Set(workspace.panels.keys)
 
         let createdPanels = afterPanels.subtracting(beforePanels)
-        XCTAssertEqual(createdPanels.count, 1, "Expected one new surface for Cmd+T path")
+        XCTAssertEqual(createdPanels.count, 1, "Expected one new surface for the shortcut path")
         guard let createdPanelId = createdPanels.first else { return }
 
         XCTAssertEqual(

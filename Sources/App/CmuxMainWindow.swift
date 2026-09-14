@@ -29,6 +29,10 @@ final class MainWindowHostingView<Content: View>: NSHostingView<Content> {
 
     required init(rootView: Content) {
         super.init(rootView: rootView)
+        configureZeroSafeAreaLayoutGuide()
+    }
+
+    private func configureZeroSafeAreaLayoutGuide() {
         addLayoutGuide(zeroSafeAreaLayoutGuide)
         NSLayoutConstraint.activate([
             zeroSafeAreaLayoutGuide.leadingAnchor.constraint(equalTo: leadingAnchor),

@@ -8,6 +8,10 @@ enum CmuxSurfaceTabBarBuiltInAction: String, Codable, Sendable, CaseIterable, Ha
     case newBrowser = "cmux.newBrowser"
     case splitRight = "cmux.splitRight"
     case splitDown = "cmux.splitDown"
+    case moveTabLeft = "cmux.moveTabLeft"
+    case moveTabRight = "cmux.moveTabRight"
+    case moveTabUp = "cmux.moveTabUp"
+    case moveTabDown = "cmux.moveTabDown"
 
     init?(configID: String) {
         switch configID {
@@ -25,6 +29,14 @@ enum CmuxSurfaceTabBarBuiltInAction: String, Codable, Sendable, CaseIterable, Ha
             self = .splitRight
         case "cmux.splitDown", "splitDown":
             self = .splitDown
+        case "cmux.moveTabLeft", "moveTabLeft":
+            self = .moveTabLeft
+        case "cmux.moveTabRight", "moveTabRight":
+            self = .moveTabRight
+        case "cmux.moveTabUp", "moveTabUp":
+            self = .moveTabUp
+        case "cmux.moveTabDown", "moveTabDown":
+            self = .moveTabDown
         default:
             return nil
         }
@@ -48,6 +60,14 @@ enum CmuxSurfaceTabBarBuiltInAction: String, Codable, Sendable, CaseIterable, Ha
             return "square.split.2x1"
         case .splitDown:
             return "square.split.1x2"
+        case .moveTabLeft:
+            return "arrow.left.square"
+        case .moveTabRight:
+            return "arrow.right.square"
+        case .moveTabUp:
+            return "arrow.up.square"
+        case .moveTabDown:
+            return "arrow.down.square"
         }
     }
 
@@ -63,6 +83,8 @@ enum CmuxSurfaceTabBarBuiltInAction: String, Codable, Sendable, CaseIterable, Ha
             return .splitRight
         case .splitDown:
             return .splitDown
+        case .moveTabLeft, .moveTabRight, .moveTabUp, .moveTabDown:
+            return nil
         }
     }
 }

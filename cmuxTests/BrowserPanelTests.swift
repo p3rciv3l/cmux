@@ -2987,6 +2987,169 @@ final class BrowserWindowPortalLifecycleTests: XCTestCase {
         )
     }
 
+    private func makeBrowserSearchOverlayConfiguration(panelId: UUID) -> BrowserPortalSearchOverlayConfiguration {
+        BrowserPortalSearchOverlayConfiguration(
+            panelId: panelId,
+            searchState: BrowserSearchState(),
+            focusRequestGeneration: 0,
+            canApplyFocusRequest: { _ in false },
+            onNext: {},
+            onPrevious: {},
+            onClose: {},
+            onFieldDidFocus: {}
+        )
+    }
+
+    // Regression guard for https://github.com/manaflow-ai/cmux/issues/5733.
+    // The per-keystroke find-overlay lookup (`searchOverlayPanelId`) used to scan
+    // `entriesByWebViewId.values`, copying each `Entry` struct. Every copy
+    // performs 3 `objc_copyWeak` ops (weak webView/containerView/anchorView)
+    // under the global Obj-C weak-table lock, so the lookup did O(panes)
+    // weak-table churn on every key event — the stack-exhaustion fault site in
+    // #5733 and a typing-latency contributor (#4405).
+    //
+    // The fix drives the lookup off the live slot view hierarchy instead. This
+    // test pins that structural property: a slot that is present in the portal
+    // host's view hierarchy but absent from `entriesByWebViewId` must still be
+    // found. The old dictionary scan never visited such a slot (returned nil);
+    // the hierarchy scan finds it. Reintroducing the `entriesByWebViewId.values`
+    // scan — the weak-copy bug class — would fail this test.
+    func testSearchOverlayLookupResolvesOffSlotHierarchyNotEntriesDictionary() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        realizeWindowLayout(window)
+        let portal = WindowBrowserPortal(window: window)
+
+        let slot = WindowBrowserSlotView(frame: NSRect(x: 0, y: 0, width: 200, height: 120))
+        let panelId = UUID()
+        slot.setSearchOverlay(makeBrowserSearchOverlayConfiguration(panelId: panelId))
+        // Install the slot into the live host hierarchy WITHOUT registering an Entry.
+        portal.browserPortalTestInstallSlotWithoutEntry(slot)
+
+        guard let overlayResponder = slot.browserPortalTestSearchOverlayView else {
+            XCTFail("Expected the slot to host a search overlay view")
+            return
+        }
+
+        XCTAssertEqual(
+            portal.searchOverlayPanelId(for: overlayResponder),
+            panelId,
+            "Find-overlay lookup must resolve off the live slot view hierarchy, not the "
+                + "entries dictionary, so it materializes zero Entry weak-copies per keystroke (#5733)"
+        )
+    }
+
+    // Companion to the regression guard above: the normal path where the slot is
+    // registered via `bind` must keep resolving its own search overlay after the
+    // hierarchy-scan rewrite (#5733).
+    func testSearchOverlayLookupResolvesBoundSlotOverlay() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        realizeWindowLayout(window)
+        let portal = WindowBrowserPortal(window: window)
+        guard let contentView = window.contentView else {
+            XCTFail("Expected content view")
+            return
+        }
+
+        let anchor = NSView(frame: NSRect(x: 20, y: 20, width: 160, height: 120))
+        contentView.addSubview(anchor)
+        let webView = CmuxWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        portal.bind(webView: webView, to: anchor, visibleInUI: true)
+        portal.synchronizeWebViewForAnchor(anchor)
+
+        guard let slot = webView.superview as? WindowBrowserSlotView else {
+            XCTFail("Expected browser slot")
+            return
+        }
+
+        let panelId = UUID()
+        slot.setSearchOverlay(makeBrowserSearchOverlayConfiguration(panelId: panelId))
+        guard let overlayResponder = slot.browserPortalTestSearchOverlayView else {
+            XCTFail("Expected the slot to host a search overlay view")
+            return
+        }
+
+        XCTAssertEqual(portal.searchOverlayPanelId(for: overlayResponder), panelId)
+        // A responder no slot owns must not match.
+        XCTAssertNil(portal.searchOverlayPanelId(for: window))
+    }
+
+    // Crash regression for https://github.com/manaflow-ai/cmux/issues/5733.
+    //
+    // The production crash was a main-thread stack-exhaustion SIGSEGV
+    // (KERN_PROTECTION_FAILURE, "Could not determine thread index for stack guard
+    // region") whose fault site was the find-overlay lookup copying `Entry`
+    // structs out of `entriesByWebViewId.values`. Each Entry copy performs 3
+    // `objc_copyWeak` ops, so at the crash-time load of 166 browser panes the
+    // lookup did ~498 weak-table-locked operations on EVERY key event and EVERY
+    // first-responder change (the reproduced stack showed the scan reached from
+    // both `cmux_performKeyEquivalent` and `cmux_makeFirstResponder` ->
+    // `BrowserPanel.ownedFocusIntent`). That per-call O(panes) weak-copy churn,
+    // stacked on top of the WebKit `doneWithKeyEvent` re-dispatch nesting, is the
+    // bug class that exhausted the 8 MB main-thread stack.
+    //
+    // True 8 MB exhaustion is not cleanly unit-testable (it needs the WebKit IPC
+    // re-dispatch chain under load), so this pins the underlying invariant at the
+    // crash-time pane count: the lookup must resolve off the live slot view
+    // hierarchy, never by enumerating/copying the entries dictionary. The find
+    // overlay is opened on the LAST of 166 host slots (worst case for any scan),
+    // none of which are registered in `entriesByWebViewId`. The fixed
+    // hierarchy-scan finds it (0 Entry copies); the old `entriesByWebViewId.values`
+    // scan would enumerate an empty dictionary and return nil.
+    func testSearchOverlayLookupRemainsHierarchyDrivenAtCrashPaneCount() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+        realizeWindowLayout(window)
+        let portal = WindowBrowserPortal(window: window)
+
+        // 166 = the browser-pane count at the time of the production crash (#5731).
+        let paneCount = 166
+        var slots: [WindowBrowserSlotView] = []
+        for index in 0..<paneCount {
+            let slot = WindowBrowserSlotView(
+                frame: NSRect(x: 0, y: CGFloat(index), width: 120, height: 1)
+            )
+            portal.browserPortalTestInstallSlotWithoutEntry(slot)
+            slots.append(slot)
+        }
+
+        let panelId = UUID()
+        guard let targetSlot = slots.last else {
+            XCTFail("Expected slots")
+            return
+        }
+        targetSlot.setSearchOverlay(makeBrowserSearchOverlayConfiguration(panelId: panelId))
+        guard let overlayResponder = targetSlot.browserPortalTestSearchOverlayView else {
+            XCTFail("Expected the slot to host a search overlay view")
+            return
+        }
+
+        XCTAssertEqual(
+            portal.searchOverlayPanelId(for: overlayResponder),
+            panelId,
+            "At the 166-pane crash profile the find-overlay lookup must resolve off the "
+                + "live slot hierarchy with zero Entry weak-copies (#5733)"
+        )
+        // A responder no slot owns must still return nil after scanning all 166 slots.
+        XCTAssertNil(portal.searchOverlayPanelId(for: window))
+    }
+
     func testBrowserPortalHostStaysAboveTerminalPortalHostDuringPortalChurn() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 320),
@@ -4233,5 +4396,375 @@ final class OmnibarNativeTextFieldCaretTests: XCTestCase {
             NSRange(location: 0, length: textLength),
             "Explicit omnibar focus requests such as Cmd+L must still select the whole URL"
         )
+    }
+}
+
+@MainActor
+@Suite(.serialized)
+struct BrowserContainedFullscreenIsolationTests {
+    private struct PageDidNotBecomeReady: Error {}
+
+    @MainActor
+    private final class FullscreenReportRecorder: NSObject, WKScriptMessageHandler {
+        private let controller = BrowserContainedFullscreenController()
+        private(set) var events: [String] = []
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            controller.userContentController(userContentController, didReceive: message)
+            guard message.frameInfo.isMainFrame,
+                  let body = message.body as? [String: Any] else { return }
+            if let marker = body["testMarker"] as? String {
+                events.append(marker)
+            } else if let active = body["active"] as? Bool,
+                      let documentID = body["documentID"] as? String,
+                      let webView = message.webView as? CmuxWebView,
+                      webView.cmuxContainedFullscreenDocumentID == documentID {
+                events.append(webView.cmuxContainedFullscreenActive == active ? "native:\(active)" : "nativeStateMismatch:\(active)")
+            }
+        }
+
+        func events(between start: String, and end: String) -> [String]? {
+            guard let first = events.firstIndex(of: start),
+                  let last = events.firstIndex(of: end), first < last else { return nil }
+            return Array(events[(first + 1)..<last])
+        }
+    }
+
+    private func waitUntil(_ condition: () async throws -> Bool) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while ContinuousClock.now < deadline {
+            if try await condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw PageDidNotBecomeReady()
+    }
+
+    private func loadFixture(in panel: BrowserPanel, marker: String) async throws {
+        let baseURL = try #require(URL(string: "https://fullscreen.test/\(marker)"))
+        panel.webView.loadHTMLString("""
+            <!doctype html><html><body data-fixture="\(marker)">
+            <div id="target" style="width:123px;height:77px;background:rgb(12,34,56)">Target</div>
+            <div id="sibling">Page sibling</div>
+            </body></html>
+            """, baseURL: baseURL)
+        do {
+            try await waitUntil {
+                (try? await panel.webView.evaluateJavaScript(
+                    "document.body?.dataset.fixture === '\(marker)' && document.readyState === 'complete'"
+                )) as? Bool == true
+            }
+        } catch {
+            let state = try? await panel.webView.evaluateJavaScript(
+                "JSON.stringify({url:location.href,ready:document.readyState,fixture:document.body?.dataset.fixture,body:document.body?.innerHTML.slice(0,400)})"
+            )
+            Issue.record("Fixture \(marker) failed: \(error); document=\(String(describing: state)); loading=\(panel.webView.isLoading); render=\(panel.shouldRenderWebView)")
+            throw error
+        }
+    }
+
+    private func runAsyncScript(_ script: String, in webView: WKWebView) async throws -> Any {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Any, Error>) in
+            webView.callAsyncJavaScript(script, arguments: [:], in: nil, in: .page) { result in
+                continuation.resume(with: result)
+            }
+        }
+    }
+
+    private func enterFullscreen(in panel: BrowserPanel) async throws {
+        let result = try await runAsyncScript("""
+            try {
+                await document.getElementById('target').requestFullscreen();
+                return 'entered';
+            } catch (error) {
+                return error.name + ': ' + error.message;
+            }
+            """, in: panel.webView)
+        #expect(result as? String == "entered")
+        try await waitUntil { panel.isElementFullscreenActive }
+    }
+
+    @Test func nativeContainmentPrecedesWebsiteFullscreenListenersAndReentrantExitRemainsOrdered() async throws {
+        let panel = BrowserPanel(workspaceId: UUID())
+        let contentController = panel.webView.configuration.userContentController
+        let handlerName = BrowserContainedFullscreenController.messageHandlerName
+        let recorder = FullscreenReportRecorder()
+        contentController.removeScriptMessageHandler(forName: handlerName)
+        contentController.add(recorder, name: handlerName)
+        defer {
+            contentController.removeScriptMessageHandler(forName: handlerName)
+            contentController.add(BrowserContainedFullscreenController(), name: handlerName)
+            panel.close()
+        }
+        try await loadFixture(in: panel, marker: "native-before-listeners")
+        let result = try await runAsyncScript("""
+            const target = document.getElementById('target');
+            // Markers share the native report's channel, so receipt order does
+            // not depend on clocks or scheduling between separate handlers.
+            const mark = testMarker => window.webkit.messageHandlers.cmuxContainedFullscreen.postMessage({testMarker});
+            let phase = 'enter';
+            const listener = event => {
+                const until = performance.now() + 20;
+                while (performance.now() < until) {}
+                mark(phase + ':' + event.type + ':done');
+            };
+            const names = ['fullscreenchange', 'webkitfullscreenchange'];
+            for (const name of names) document.addEventListener(name, listener);
+            try {
+                mark('enter:start');
+                await target.requestFullscreen();
+                mark('enter:end');
+                phase = 'exit';
+                mark('exit:start');
+                await document.exitFullscreen();
+                mark('exit:end');
+            } finally {
+                for (const name of names) document.removeEventListener(name, listener);
+            }
+            document.addEventListener('fullscreenchange', () => {
+                mark('reentrant:listener:start');
+                document.exitFullscreen();
+                mark('reentrant:listener:done');
+            }, {once:true});
+            mark('reentrant:start');
+            await target.requestFullscreen();
+            mark('reentrant:end');
+            mark('finished');
+            return document.fullscreenElement === null;
+            """, in: panel.webView)
+        try await waitUntil { recorder.events.contains("finished") }
+
+        let entry = try #require(recorder.events(between: "enter:start", and: "enter:end"))
+        #expect(entry == ["native:true", "enter:fullscreenchange:done", "enter:webkitfullscreenchange:done"])
+        let exit = try #require(recorder.events(between: "exit:start", and: "exit:end"))
+        #expect(exit == ["native:false", "exit:fullscreenchange:done", "exit:webkitfullscreenchange:done"])
+        let reentrant = try #require(recorder.events(between: "reentrant:start", and: "reentrant:end"))
+        #expect(reentrant == ["native:true", "reentrant:listener:start", "native:false", "reentrant:listener:done"])
+        #expect(result as? Bool == true)
+        #expect(!panel.isElementFullscreenActive)
+        #expect((panel.webView as? CmuxWebView)?.cmuxContainedFullscreenActive == false)
+    }
+
+    @Test func pageFullscreenRemainsInItsViewAndNavigationAndCloseClearOnlyItsOwner() async throws {
+        let first = BrowserPanel(workspaceId: UUID())
+        let second = BrowserPanel(workspaceId: UUID())
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 500),
+            styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false
+        )
+        window.isReleasedWhenClosed = false
+        var secondWasClosed = false
+        defer {
+            first.close()
+            if !secondWasClosed { second.close() }
+            window.close()
+        }
+        let content = try #require(window.contentView)
+        let firstSlot = WindowBrowserSlotView(frame: NSRect(x: 0, y: 0, width: 400, height: 500))
+        let secondSlot = WindowBrowserSlotView(frame: NSRect(x: 400, y: 0, width: 400, height: 500))
+        content.addSubview(firstSlot)
+        content.addSubview(secondSlot)
+        firstSlot.addSubview(first.webView)
+        secondSlot.addSubview(second.webView)
+        firstSlot.pinHostedWebView(first.webView)
+        secondSlot.pinHostedWebView(second.webView)
+        let nativeFrame = window.frame
+        let nativeStyle = window.styleMask
+        let firstFrame = first.webView.frame
+        let secondFrame = second.webView.frame
+
+        try await loadFixture(in: first, marker: "first")
+        try await loadFixture(in: second, marker: "second")
+        let styleSnapshot = """
+            (() => {
+                const style = document.getElementById('target').style;
+                return JSON.stringify(Array.from(style).sort().map(name =>
+                    [name, style.getPropertyValue(name), style.getPropertyPriority(name)]));
+            })()
+            """
+        let originalStyle = try await first.webView.evaluateJavaScript(styleSnapshot) as? String
+        try await enterFullscreen(in: first)
+        #expect(!second.isElementFullscreenActive)
+        let fillsViewport = try await first.webView.evaluateJavaScript("""
+            (() => {
+                const target = document.getElementById('target');
+                const rect = target.getBoundingClientRect();
+                return document.fullscreenElement === target &&
+                    Math.abs(rect.x) < 1 && Math.abs(rect.y) < 1 &&
+                    Math.abs(rect.width - innerWidth) < 1 && Math.abs(rect.height - innerHeight) < 1;
+            })()
+            """) as? Bool
+        #expect(fillsViewport == true)
+        let fullscreenBackground = try await first.webView.evaluateJavaScript(
+            "getComputedStyle(document.getElementById('target')).backgroundColor"
+        ) as? String
+        #expect(fullscreenBackground == "rgb(12, 34, 56)")
+        #expect(first.webView.fullscreenState == .notInFullscreen)
+        #expect(first.webView.window === window)
+        #expect(first.webView.superview === firstSlot)
+        #expect(second.webView.superview === secondSlot)
+        #expect(window.frame == nativeFrame)
+        #expect(window.styleMask == nativeStyle)
+        #expect(first.webView.frame == firstFrame)
+        #expect(second.webView.frame == secondFrame)
+
+        _ = try await runAsyncScript("""
+            const nativeRAF = window.requestAnimationFrame;
+            let frames = [];
+            window.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
+            const tick = () => { const pending = frames; frames = []; pending.forEach(callback => callback(performance.now())); };
+            try {
+                await document.exitFullscreen();
+                tick(); tick();
+                return true;
+            } finally {
+                window.requestAnimationFrame = nativeRAF;
+            }
+            """, in: first.webView)
+        try await waitUntil { !first.isElementFullscreenActive }
+        let restoredStyle = try await first.webView.evaluateJavaScript(styleSnapshot) as? String
+        #expect(restoredStyle == originalStyle)
+        let restoredAbsentStyleAttributes = try await first.webView.evaluateJavaScript(
+            "!document.body.hasAttribute('style') && !document.documentElement.hasAttribute('style')"
+        ) as? Bool
+        #expect(restoredAbsentStyleAttributes == true)
+
+        try await enterFullscreen(in: first)
+        try await enterFullscreen(in: second)
+        try await loadFixture(in: first, marker: "replacement")
+        #expect(!first.isElementFullscreenActive)
+        #expect(second.isElementFullscreenActive)
+        #expect(window.frame == nativeFrame)
+        #expect(window.styleMask == nativeStyle)
+        #expect(second.webView.frame == secondFrame)
+
+        second.close()
+        secondWasClosed = true
+        #expect(!second.isElementFullscreenActive)
+        #expect(!first.isElementFullscreenActive)
+    }
+
+    @Test func transitionSuppressionLastsTwoFramesAndPreservesAuthoredStyles() async throws {
+        let panel = BrowserPanel(workspaceId: UUID())
+        defer { panel.close() }
+        try await loadFixture(in: panel, marker: "transitions")
+        let result = try await runAsyncScript("""
+            const target = document.getElementById('target');
+            const sibling = document.getElementById('sibling');
+            const ancestor = document.createElement('section');
+            ancestor.id = 'ancestor'; target.before(ancestor); ancestor.append(target);
+            const nested = document.createElement('div');
+            nested.id = 'nested'; target.append(nested);
+            const ancestors = [ancestor, document.body, document.documentElement];
+            const authored = document.createElement('style');
+            authored.textContent = 'html, body, #ancestor, #target, #nested, #sibling, #sibling::before { transition: opacity 2s 1s; } #sibling::before { content: "probe"; }';
+            document.head.append(authored);
+            const styleSnapshot = () => JSON.stringify([target, nested, sibling, ...ancestors].map(element =>
+                [element.hasAttribute('style'), Array.from(element.style).sort().map(name =>
+                    [name, element.style.getPropertyValue(name), element.style.getPropertyPriority(name)])]));
+            const originalStyle = styleSnapshot();
+            const originallyAbsent = [target, nested, sibling, ...ancestors].filter(element => !element.hasAttribute('style'));
+            const nativeRAF = window.requestAnimationFrame;
+            let frames = [];
+            window.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
+            const tick = () => { const pending = frames; frames = []; pending.forEach(callback => callback(performance.now())); };
+            const timing = (element, pseudo) => {
+                const style = getComputedStyle(element, pseudo);
+                return [style.transitionDuration, style.transitionDelay];
+            };
+            try {
+                await target.requestFullscreen();
+                const entry = timing(target);
+                const ancestorEntry = ancestors.map(element => timing(element));
+                const siblingEntry = timing(sibling);
+                const pseudo = timing(sibling, '::before');
+                tick();
+                const firstFrame = timing(target);
+                const ancestorFirstFrame = ancestors.map(element => timing(element));
+                tick();
+                const secondFrame = timing(target);
+                const ancestorSecondFrame = ancestors.map(element => timing(element));
+                await document.exitFullscreen();
+                const exit = timing(target);
+                const ancestorExit = ancestors.map(element => timing(element));
+                const siblingExit = timing(sibling);
+                tick(); tick();
+                const restored = timing(target);
+                const stylesRestored = styleSnapshot() === originalStyle;
+                const absentStylesRestored = originallyAbsent.every(element => !element.hasAttribute('style'));
+                // A stale entry callback cannot end suppression for a newer exit.
+                await target.requestFullscreen();
+                tick();
+                // Reapplying suppression must adopt this authored update rather
+                // than restoring the value from before the first entry.
+                target.style.setProperty('transition-duration', '3s', 'important');
+                await document.exitFullscreen();
+                tick();
+                const overlap = timing(target);
+                const ancestorOverlap = ancestors.map(element => timing(element));
+                tick();
+                const afterOverlap = timing(target);
+                const authoredDuration = [target.style.getPropertyValue('transition-duration'),
+                    target.style.getPropertyPriority('transition-duration')];
+                target.style.removeProperty('transition-duration');
+                // Nested replacement keeps the union suppressed until the
+                // newest operation receives both of its animation frames.
+                await target.requestFullscreen();
+                tick();
+                await nested.requestFullscreen();
+                tick();
+                const nestedOverlap = [nested, target, ...ancestors].map(element => timing(element));
+                tick();
+                const nestedRestored = [nested, target, ...ancestors].map(element => timing(element));
+                await document.exitFullscreen();
+                await document.exitFullscreen();
+                tick(); tick();
+                return {entry, ancestorEntry, siblingEntry, pseudo, firstFrame, ancestorFirstFrame,
+                    secondFrame, ancestorSecondFrame, exit, ancestorExit, siblingExit, restored,
+                    overlap, ancestorOverlap, afterOverlap, authoredDuration, nestedOverlap, nestedRestored,
+                    stylesRestored, absentStylesRestored, finalStylesRestored: styleSnapshot() === originalStyle};
+            } finally {
+                if (document.fullscreenElement) await document.exitFullscreen();
+                tick(); tick();
+                window.requestAnimationFrame = nativeRAF;
+                authored.remove();
+            }
+            """, in: panel.webView)
+        let report = try #require(result as? [String: Any])
+        for name in ["entry", "firstFrame", "exit", "overlap"] {
+            #expect(report[name] as? [String] == ["0s", "0s"])
+        }
+        for name in ["siblingEntry", "pseudo", "siblingExit", "secondFrame", "restored"] {
+            #expect(report[name] as? [String] == ["2s", "1s"])
+        }
+        for name in ["ancestorEntry", "ancestorFirstFrame", "ancestorExit", "ancestorOverlap"] {
+            #expect(report[name] as? [[String]] == Array(repeating: ["0s", "0s"], count: 3))
+        }
+        #expect(report["ancestorSecondFrame"] as? [[String]] == Array(repeating: ["2s", "1s"], count: 3))
+        #expect(report["afterOverlap"] as? [String] == ["3s", "1s"])
+        #expect(report["authoredDuration"] as? [String] == ["3s", "important"])
+        #expect(report["nestedOverlap"] as? [[String]] == Array(repeating: ["0s", "0s"], count: 5))
+        #expect(report["nestedRestored"] as? [[String]] == Array(repeating: ["2s", "1s"], count: 5))
+        #expect(report["stylesRestored"] as? Bool == true)
+        #expect(report["absentStylesRestored"] as? Bool == true)
+        #expect(report["finalStylesRestored"] as? Bool == true)
+    }
+
+    @Test func documentResetClearsTokenAndNotifiesOnlyForStateChanges() throws {
+        let webView = CmuxWebView(frame: .zero, configuration: WKWebViewConfiguration())
+        var observed: [Bool] = []
+        webView.onContainedFullscreenChanged = { active in
+            #expect(webView.cmuxContainedFullscreenActive == active)
+            observed.append(active)
+        }
+        defer { webView.onContainedFullscreenChanged = nil }
+        webView.cmuxSynchronizeContainedFullscreenDocument()
+        #expect(webView.cmuxContainedFullscreenDocumentID != nil)
+        webView.cmuxSetContainedFullscreenActive(true)
+        webView.cmuxSetContainedFullscreenActive(true)
+        webView.cmuxResetContainedFullscreen()
+        webView.cmuxResetContainedFullscreen()
+        #expect(!webView.cmuxContainedFullscreenActive)
+        #expect(webView.cmuxContainedFullscreenDocumentID == nil)
+        #expect(observed == [true, false])
     }
 }

@@ -191,13 +191,78 @@ struct WorkspaceContentView: View {
         return isSelectedInPane || isFocused
     }
 
+    static func panelFocusedInUI(
+        isWorkspaceInputActive: Bool,
+        isSelectedInPane: Bool,
+        isFocusedInPane: Bool,
+        isGloballyFocused: @autoclosure () -> Bool
+    ) -> Bool {
+        guard isWorkspaceInputActive else { return false }
+        // Selected content follows its local pane projection. Reading the
+        // controller's global focus here would invalidate every pane on focus.
+        if isSelectedInPane { return isFocusedInPane }
+        // A moving tab may briefly be unselected in its old pane while its
+        // portal remains focused. Preserve that existing visibility exception.
+        return isGloballyFocused()
+    }
+
+    static func workspaceManualUnreadRepresentative(
+        workspace: Workspace,
+        isWorkspaceManuallyUnread: Bool
+    ) -> UUID? {
+        // Ordinary focus changes must not alter the shared pane-content revision
+        // or add a global focus dependency when no workspace unread ring exists.
+        guard isWorkspaceManuallyUnread else { return nil }
+        return workspace.representativePanelIdForWorkspaceManualUnread()
+    }
+
     var body: some View {
         let appearance = PanelAppearance.fromConfig(config)
         let isSplit = workspace.bonsplitController.allPaneIds.count > 1 ||
             workspace.panels.count > 1
         let usesWorkspacePaneOverlay = TmuxOverlayExperimentSettings.target().usesWorkspacePaneOverlay
         let isWorkspaceManuallyUnread = notificationStore.hasManualUnread(forTabId: workspace.id)
-        let workspaceManualUnreadPanelId = workspace.representativePanelIdForWorkspaceManualUnread()
+        let workspaceManualUnreadPanelId = Self.workspaceManualUnreadRepresentative(
+            workspace: workspace,
+            isWorkspaceManuallyUnread: isWorkspaceManuallyUnread
+        )
+        let manualUnreadPanelIds = workspace.manualUnreadPanelIds
+        let restoredUnreadPanelIds = workspace.restoredUnreadPanelIds
+        let unreadPanelIds = Set(workspace.panels.keys.filter { panelId in
+            Workspace.shouldShowUnreadIndicator(
+                hasUnreadNotification: notificationStore.hasVisibleNotificationIndicator(
+                    forTabId: workspace.id,
+                    surfaceId: panelId
+                ),
+                hasPanelUnreadIndicator: manualUnreadPanelIds.contains(panelId) ||
+                    restoredUnreadPanelIds.contains(panelId),
+                isWorkspaceManuallyUnread: isWorkspaceManuallyUnread,
+                isWorkspaceManualUnreadRepresentative: workspaceManualUnreadPanelId == panelId
+            )
+        })
+        let terminalAgentContexts = workspace.panels.mapValues {
+            Self.terminalAgentContext(panel: $0, workspace: workspace)
+        }
+        // Native geometry and order changes keep the same content closures. Every
+        // captured external value still participates in equality, while ordinary
+        // workspace publications invalidate through the separate content revision.
+        let paneContentRevision: [AnyHashable] = [
+            workspace.id,
+            ObjectIdentifier(workspace.bonsplitController),
+            workspace.paneContentRevision,
+            isWorkspaceVisible,
+            isWorkspaceInputActive,
+            workspacePortalPriority,
+            isSplit,
+            appearance,
+            usesWorkspacePaneOverlay,
+            isWorkspaceManuallyUnread,
+            workspaceManualUnreadPanelId,
+            unreadPanelIds,
+            workspace.surfaceIdToPanelId,
+            workspace.panels.mapValues { ObjectIdentifier($0) },
+            terminalAgentContexts,
+        ]
 
         // Inactive workspaces are kept alive in a ZStack (for state preservation) but their
         // AppKit-backed views can still intercept drags. Disable drop acceptance for them.
@@ -216,27 +281,26 @@ struct WorkspaceContentView: View {
             }
         }()
 
-        let bonsplitView = BonsplitView(controller: workspace.bonsplitController) { tab, paneId in
+        let bonsplitView = BonsplitView(
+            controller: workspace.bonsplitController,
+            contentRevision: AnyHashable(paneContentRevision)
+        ) { tab, paneId, context in
             // Content for each tab in bonsplit
             let _ = Self.debugPanelLookup(tab: tab, workspace: workspace)
             if let panel = workspace.panel(for: tab.id) {
-                let isFocused = isWorkspaceInputActive && workspace.focusedPanelId == panel.id
-                let isSelectedInPane = workspace.bonsplitController.selectedTab(inPane: paneId)?.id == tab.id
+                let isSelectedInPane = context.isSelected
+                let isFocused = Self.panelFocusedInUI(
+                    isWorkspaceInputActive: isWorkspaceInputActive,
+                    isSelectedInPane: isSelectedInPane,
+                    isFocusedInPane: context.isFocused,
+                    isGloballyFocused: workspace.focusedPanelId == panel.id
+                )
                 let isVisibleInUI = Self.panelVisibleInUI(
                     isWorkspaceVisible: isWorkspaceVisible,
                     isSelectedInPane: isSelectedInPane,
                     isFocused: isFocused
                 )
-                let showsNotificationRing = Workspace.shouldShowUnreadIndicator(
-                    hasUnreadNotification: notificationStore.hasVisibleNotificationIndicator(
-                        forTabId: workspace.id,
-                        surfaceId: panel.id
-                    ),
-                    hasPanelUnreadIndicator: workspace.manualUnreadPanelIds.contains(panel.id) ||
-                        workspace.restoredUnreadPanelIds.contains(panel.id),
-                    isWorkspaceManuallyUnread: isWorkspaceManuallyUnread,
-                    isWorkspaceManualUnreadRepresentative: workspaceManualUnreadPanelId == panel.id
-                )
+                let showsNotificationRing = unreadPanelIds.contains(panel.id)
                 PanelContentView(
                     panel: panel,
                     workspaceId: workspace.id,
@@ -248,7 +312,7 @@ struct WorkspaceContentView: View {
                     isSplit: isSplit,
                     appearance: appearance,
                     hasUnreadNotification: showsNotificationRing && !usesWorkspacePaneOverlay,
-                    terminalAgentContext: Self.terminalAgentContext(panel: panel, workspace: workspace),
+                    terminalAgentContext: terminalAgentContexts[panel.id] ?? "",
                     onFocus: {
                         // Keep bonsplit focus in sync with the AppKit first responder for the
                         // active workspace. This prevents divergence between the blue focused-tab
@@ -294,10 +358,9 @@ struct WorkspaceContentView: View {
                 }
         }
         .internalOnlyTabDrag()
-        // Split zoom swaps Bonsplit between the full split tree and a single pane view.
-        // Recreate the Bonsplit subtree on zoom enter/exit so stale pre-zoom pane chrome
-        // cannot remain stacked above portal-hosted browser content.
-        .id(splitZoomRenderIdentity)
+        // Bonsplit retains its native split tree while zooming and hides the sibling
+        // branches in place. Preserve this UI identity so pane hosts and portal anchors
+        // survive zoom transitions instead of rebuilding every pane's chrome.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             updateAgentHibernationPresentationVisibility()
@@ -396,10 +459,6 @@ struct WorkspaceContentView: View {
                 }
             }
         }
-    }
-
-    private var splitZoomRenderIdentity: String {
-        workspace.bonsplitController.zoomedPaneId.map { "zoom:\($0.id.uuidString)" } ?? "unzoomed"
     }
 
     private static let tmuxWorkspacePaneTopChromeHeight: CGFloat = MinimalModeChromeMetrics.titlebarHeight

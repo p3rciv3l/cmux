@@ -723,6 +723,13 @@ final class WindowBrowserHostView: NSView {
             in: self,
             eventType: eventType
         ) else { return false }
+        if decision.result {
+            for case let slot as WindowBrowserSlotView in subviews.reversed() {
+                if slot.containsContainedFullscreenContent(at: decision.windowPoint) {
+                    return false
+                }
+            }
+        }
         return decision.result
     }
 
@@ -1485,6 +1492,14 @@ final class WindowBrowserSlotView: NSView {
     fileprivate var isApplyingHostedInspectorLayout = false
     private var lastHostedInspectorLayoutBoundsSize: NSSize?
 
+    fileprivate func containsContainedFullscreenContent(at windowPoint: NSPoint) -> Bool {
+        guard !isHiddenOrHasHiddenAncestor, alphaValue > 0,
+              let webView = hostedWebView as? CmuxWebView,
+              webView.cmuxContainedFullscreenActive,
+              webView.superview === self else { return false }
+        return bounds.contains(convert(windowPoint, from: nil))
+    }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -1755,6 +1770,12 @@ final class WindowBrowserSlotView: NSView {
 
         return false
     }
+
+#if DEBUG
+    // Test seam for #5733: exposes the slot's search-overlay view so tests can
+    // route a responder that this slot owns.
+    var browserPortalTestSearchOverlayView: NSView? { searchOverlayHostingView }
+#endif
 
     func searchOverlayPanelId(for responder: NSResponder) -> UUID? {
         guard let overlay = searchOverlayHostingView else { return nil }
@@ -2067,6 +2088,19 @@ final class WindowBrowserPortal: NSObject {
 
     private var entriesByWebViewId: [ObjectIdentifier: Entry] = [:]
     private var webViewByAnchorId: [ObjectIdentifier: ObjectIdentifier] = [:]
+
+#if DEBUG
+    // Test seam for https://github.com/manaflow-ai/cmux/issues/5733. Installs a
+    // slot container into the portal host without registering an Entry, so tests
+    // can prove the find-overlay lookup resolves off the live slot view hierarchy
+    // rather than by enumerating/copying Entry values out of entriesByWebViewId
+    // (each Entry copy = 3 objc_copyWeak ops under the global weak-table lock;
+    // O(panes) per keystroke — the stack-exhaustion fault site and a
+    // typing-latency contributor, #4405).
+    func browserPortalTestInstallSlotWithoutEntry(_ slot: WindowBrowserSlotView) {
+        hostView.addSubview(slot)
+    }
+#endif
 
     init(window: NSWindow) {
         self.window = window
@@ -3029,8 +3063,18 @@ final class WindowBrowserPortal: NSObject {
     }
 
     func searchOverlayPanelId(for responder: NSResponder) -> UUID? {
-        for entry in entriesByWebViewId.values {
-            if let panelId = entry.containerView?.searchOverlayPanelId(for: responder) {
+        // Drive the lookup off the live slot view hierarchy rather than copying
+        // Entry structs out of entriesByWebViewId. Each Entry copy performs 3
+        // objc_copyWeak ops under the global weak-table lock, so the old
+        // `.values` scan did O(panes) weak-table churn on every keystroke — the
+        // stack-exhaustion fault site in #5733 and a typing-latency contributor
+        // (#4405). Slot containers are the portal host's subviews, and only a
+        // container in the view hierarchy can own the window's first responder,
+        // so iterating subviews covers every slot that could match. The slot's
+        // own searchOverlayPanelId(for:) early-returns when it has no open find
+        // overlay, keeping the common (no-find) case cheap.
+        for case let container as WindowBrowserSlotView in hostView.subviews {
+            if let panelId = container.searchOverlayPanelId(for: responder) {
                 return panelId
             }
         }
@@ -3040,8 +3084,10 @@ final class WindowBrowserPortal: NSObject {
     @discardableResult
     func yieldSearchOverlayFocusIfOwned(by panelId: UUID) -> Bool {
         guard let window else { return false }
-        for entry in entriesByWebViewId.values {
-            if entry.containerView?.yieldSearchOverlayFocusIfOwned(by: panelId, in: window) == true {
+        // See searchOverlayPanelId(for:) — iterate the live slot hierarchy to
+        // avoid per-call Entry weak-copy churn (#5733).
+        for case let container as WindowBrowserSlotView in hostView.subviews {
+            if container.yieldSearchOverlayFocusIfOwned(by: panelId, in: window) == true {
                 return true
             }
         }
@@ -3077,6 +3123,16 @@ final class WindowBrowserPortal: NSObject {
             webView,
             in: containerView,
             reason: refreshSource
+        )
+    }
+
+    func synchronizeContainedFullscreenGeometry(withId webViewId: ObjectIdentifier) {
+        // Containment resizes the existing pane. Let synchronization request full
+        // presentation recovery only when it actually attaches or reveals a host.
+        synchronizeWebView(
+            withId: webViewId,
+            source: "containedFullscreenChanged",
+            forcePresentationRefresh: false
         )
     }
 
@@ -3495,7 +3551,22 @@ final class WindowBrowserPortal: NSObject {
         }
 
         _ = synchronizeHostFrameToReference()
-        let frameInWindow = effectiveAnchorFrameInWindow(for: anchorView)
+        var frameInWindow = effectiveAnchorFrameInWindow(for: anchorView)
+        if (webView as? CmuxWebView)?.cmuxContainedFullscreenActive == true,
+           entry.visibleInUI,
+           frameInWindow.width > 1, frameInWindow.height > 1 {
+            // Cover this pane's chrome without changing its layout or the user's
+            // omnibar preference. Expand after ancestor clipping, which ends at
+            // the ordinary browser content area rather than the full pane.
+            let omnibarHeight = max(0, entry.paneTopChromeHeight)
+            let tabBarHeight = WindowChromeMetrics.bonsplitTabBarHeight
+            let tabBarProbe = NSPoint(
+                x: frameInWindow.midX,
+                y: frameInWindow.maxY + omnibarHeight + tabBarHeight / 2
+            )
+            let hasTabBar = BonsplitTabBarHitRegionRegistry.containsWindowPoint(tabBarProbe, in: window)
+            frameInWindow.size.height += omnibarHeight + (hasTabBar ? tabBarHeight : 0)
+        }
         let frameInHostRaw = hostView.convert(frameInWindow, from: nil)
         let frameInHost = Self.pixelSnappedRect(frameInHostRaw, in: hostView)
         let hostBounds = hostView.bounds
@@ -4178,6 +4249,14 @@ enum BrowserWindowPortalRegistry {
         guard let windowId = webViewToWindowId[webViewId],
               let portal = portalsByWindowId[windowId] else { return }
         portal.forceRefreshWebView(withId: webViewId, reason: reason)
+        postRegistryDidChange(for: webView)
+    }
+
+    static func synchronizeContainedFullscreenGeometry(webView: WKWebView) {
+        let webViewId = ObjectIdentifier(webView)
+        guard let windowId = webViewToWindowId[webViewId],
+              let portal = portalsByWindowId[windowId] else { return }
+        portal.synchronizeContainedFullscreenGeometry(withId: webViewId)
         postRegistryDidChange(for: webView)
     }
 

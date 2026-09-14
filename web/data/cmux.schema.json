@@ -1061,6 +1061,21 @@
         }
       }
     },
+    "diffViewer": {
+      "title": "diffViewer",
+      "description": "Built-in diff viewer settings.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultLayout": {
+          "type": "string",
+          "enum": ["unified", "split"],
+          "default": "unified",
+          "description": "Default layout for newly opened diff viewers. The toolbar layout toggle persists the user's last choice; an explicit `cmux diff --layout` option overrides both.",
+          "descriptionKey": "schemaDescriptions.diffViewer.defaultLayout"
+        }
+      }
+    },
     "shortcuts": {
       "title": "shortcuts",
       "description": "Keyboard shortcut settings from Settings > Keyboard Shortcuts.",
@@ -1070,7 +1085,8 @@
         "bindings": {
           "type": "object",
           "default": {},
-          "description": "Shortcut overrides keyed by cmux action id. Use a string for a single shortcut, an array for a chord, null, an empty string, none, clear, unbound, or disabled to unbind.",
+          "description": "Shortcut overrides keyed by cmux action id. Use a string for one stroke, an array for a chord, or a recorder object to preserve physical key codes. Use null, an empty string, none, clear, unbound, or disabled to unbind.",
+          "descriptionKey": "schemaDescriptions.shortcuts.bindings",
           "propertyNames": {
             "enum": [
               "openSettings",
@@ -1122,14 +1138,32 @@
               "toggleTerminalCopyMode",
               "focusTextBoxInput",
               "attachTextBoxFile",
+              "sendCtrlFToTerminal",
               "focusLeft",
               "focusRight",
               "focusUp",
               "focusDown",
+              "moveTabLeft",
+              "moveTabRight",
+              "moveTabUp",
+              "moveTabDown",
               "splitRight",
               "splitDown",
               "toggleSplitZoom",
               "equalizeSplits",
+              "tilingTile",
+              "tilingMonocle",
+              "tilingToggleLayout",
+              "tilingFocusNext",
+              "tilingFocusPrevious",
+              "tilingMoveNext",
+              "tilingMovePrevious",
+              "tilingPromote",
+              "tilingIncreaseMasterCount",
+              "tilingDecreaseMasterCount",
+              "tilingIncreaseMasterRatio",
+              "tilingDecreaseMasterRatio",
+              "tilingManual",
               "splitBrowserRight",
               "splitBrowserDown",
               "toggleFileExplorer",
@@ -1155,6 +1189,7 @@
               "showBrowserJavaScriptConsole",
               "toggleBrowserFocusMode",
               "toggleReactGrab",
+              "openDiffViewer",
               "diffViewerScrollDown",
               "diffViewerScrollUp",
               "diffViewerScrollToBottom",
@@ -1182,6 +1217,15 @@
           "additionalProperties": {
             "$ref": "#/$defs/shortcutBindingNullable"
           }
+        },
+        "when": {
+          "type": "object",
+          "default": {},
+          "description": "Optional per-action context predicates (VS Code-style `when` clauses), keyed by cmux action id. Each value is a boolean expression over context keys combined with !, &&, ||, and parentheses. Boolean keys: sidebarFocus, browserFocus, markdownFocus, terminalFocus, commandPaletteVisible, terminalFindVisible. Typed keys support comparisons: the string sidebarMode (files, find, sessions, feed, or dock) and the integers paneCount and workspaceCount. Comparison operators are ==, !=, =~ (regex), <, <=, >, >=, and `in [a, b]`; an unknown or absent key reads as false. The boolean literals true and false are also accepted; `key == false` is the same as `!key`. The action's shortcut only fires (and only conflicts with other shortcuts) when the clause holds. Examples: { \"selectWorkspaceByNumber\": \"!sidebarFocus\" } selects workspaces with Ctrl+1–9 everywhere except when the right sidebar is focused; { \"selectSurfaceByNumber\": \"sidebarMode == 'find' && paneCount > 1\" } scopes a binding to the Find sidebar when the workspace has multiple panes.",
+          "descriptionKey": "schemaDescriptions.shortcuts.when",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     }
@@ -1204,6 +1248,20 @@
     },
     "shortcutBinding": {
       "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/shortcutBindingObject"
+            },
+            {
+              "properties": {
+                "first": {
+                  "$ref": "#/$defs/shortcutFirstStrokeObject"
+                }
+              }
+            }
+          ]
+        },
         {
           "$ref": "#/$defs/unboundShortcutBinding",
           "description": "Unbind this shortcut. Accepted values are an empty string, none, clear, unbound, or disabled."
@@ -1242,6 +1300,9 @@
     "diffViewerShortcutBinding": {
       "oneOf": [
         {
+          "$ref": "#/$defs/shortcutBindingObject"
+        },
+        {
           "$ref": "#/$defs/unboundShortcutBinding",
           "description": "Unbind this shortcut. Accepted values are an empty string, none, clear, unbound, or disabled."
         },
@@ -1279,6 +1340,87 @@
     "unboundShortcutBinding": {
       "type": "string",
       "enum": ["", "none", "clear", "unbound", "disabled"]
+    },
+    "shortcutBindingObject": {
+      "type": "object",
+      "required": ["first"],
+      "additionalProperties": false,
+      "properties": {
+        "first": {
+          "$ref": "#/$defs/shortcutStrokeObject"
+        },
+        "second": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/shortcutStrokeObject"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "description": "Lossless shortcut object written by Settings. The first stroke is required; an empty first key unbinds the action. The optional second stroke completes a chord.",
+      "descriptionKey": "schemaDescriptions.shortcuts.bindingObject"
+    },
+    "shortcutStrokeObject": {
+      "type": "object",
+      "required": ["key"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "command": {
+          "type": "boolean"
+        },
+        "shift": {
+          "type": "boolean"
+        },
+        "option": {
+          "type": "boolean"
+        },
+        "control": {
+          "type": "boolean"
+        },
+        "keyCode": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 65535
+        }
+      },
+      "description": "Recorded key and modifier flags, with an optional macOS physical key code. Omitted modifier flags are false.",
+      "descriptionKey": "schemaDescriptions.shortcuts.strokeObject"
+    },
+    "shortcutFirstStrokeObject": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/shortcutStrokeObject"
+        },
+        {
+          "anyOf": [
+            {
+              "properties": { "key": { "enum": ["", "space"] } }
+            },
+            {
+              "required": ["command"],
+              "properties": { "command": { "const": true } }
+            },
+            {
+              "required": ["shift"],
+              "properties": { "shift": { "const": true } }
+            },
+            {
+              "required": ["option"],
+              "properties": { "option": { "const": true } }
+            },
+            {
+              "required": ["control"],
+              "properties": { "control": { "const": true } }
+            }
+          ]
+        }
+      ]
     },
     "shortcutFirstStroke": {
       "allOf": [

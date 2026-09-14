@@ -2,6 +2,9 @@ import AppKit
 
 extension ContentView {
     static func commandPaletteShortcutAction(forCommandID commandId: String) -> KeyboardShortcutSettings.Action? {
+        if let tilingAction = KeyboardShortcutSettings.tilingActions.first(where: { $0.tilingCommandID == commandId }) {
+            return tilingAction
+        }
         if let rightSidebarModeAction = commandPaletteRightSidebarModeShortcutAction(forCommandID: commandId) {
             return rightSidebarModeAction
         }
@@ -61,6 +64,14 @@ extension ContentView {
             return .splitRight
         case "palette.terminalSplitDown":
             return .splitDown
+        case "palette.moveTabLeft":
+            return .moveTabLeft
+        case "palette.moveTabRight":
+            return .moveTabRight
+        case "palette.moveTabUp":
+            return .moveTabUp
+        case "palette.moveTabDown":
+            return .moveTabDown
         case "palette.findInDirectory":
             return .findInDirectory
         case "palette.terminalFind":

@@ -20,6 +20,19 @@ const shortcutChordExample = `{
   }
 }`;
 
+const tilingShortcutExample = `{
+  "shortcuts": {
+    "bindings": {
+      "tilingTile": ["ctrl+b", "t"],
+      "tilingMonocle": ["ctrl+b", "m"],
+      "tilingFocusNext": ["ctrl+b", "j"],
+      "tilingFocusPrevious": ["ctrl+b", "k"],
+      "tilingPromote": ["ctrl+b", "return"],
+      "tilingManual": ["ctrl+b", "f"]
+    }
+  }
+}`;
+
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
   const t = await getTranslations({ locale, namespace: "docs.keyboardShortcuts" });
@@ -52,6 +65,18 @@ export default function KeyboardShortcutsPage() {
         <li>{t("chordsRuleArray")}</li>
         <li>{t("chordsRuleSyntax")}</li>
       </ul>
+
+      <DocsHeading level={2} id="pane-tiling" className="scroll-mt-24">{t("tilingTitle")}</DocsHeading>
+      <p>{t("tilingIntro")}</p>
+      <p>{t("tilingActions")}</p>
+      <CodeBlock title="cmux.json" lang="json">{tilingShortcutExample}</CodeBlock>
+      <p>{t("tilingAutomation")}</p>
+      <CodeBlock lang="bash">{`cmux rpc workspace.tiling.action '{"action":"tile"}'
+cmux rpc workspace.tiling.state '{}'`}</CodeBlock>
+      <p>{t("tilingActionNames")}</p>
+      <CodeBlock lang="text">{`tile, monocle, toggleLayout, focusNext, focusPrevious,
+moveNext, movePrevious, promote, increaseMasterCount,
+decreaseMasterCount, increaseMasterRatio, decreaseMasterRatio, manual`}</CodeBlock>
 
       <KeyboardShortcuts />
     </>

@@ -132,9 +132,10 @@ enum BrowserImageCopyPasteboardBuilder {
 
 /// WKWebView tends to consume some app command equivalents,
 /// preventing the app menu/SwiftUI Commands from receiving them. Route app/menu
-/// shortcuts first by default, but allow browser content to try browser-local
-/// Find-family shortcuts. The configured Find shortcut stays app-owned so cmux can
-/// choose browser find or right-sidebar file search from the current focus owner.
+/// shortcuts first by default, with narrow browser-content exceptions for
+/// command equivalents that need page/keyDown handling. The configured Find
+/// shortcut stays app-owned so cmux can choose browser find or right-sidebar
+/// file search from the current focus owner.
 final class CmuxWebView: WKWebView {
     // Some sites/WebKit paths report middle-click link activations as
     // WKNavigationAction.buttonNumber=4 instead of 2. Track a recent local
@@ -380,6 +381,40 @@ final class CmuxWebView: WKWebView {
     private static var contextMenuFallbackKey: UInt8 = 0
     private static let pasteAsPlainTextKeyCode: UInt16 = 9 // V key (hardware position, layout-independent)
     var onContextMenuDownloadStateChanged: ((Bool) -> Void)?
+    private(set) var cmuxContainedFullscreenActive = false
+    private(set) var cmuxContainedFullscreenDocumentID: String?
+    var onContainedFullscreenChanged: ((Bool) -> Void)?
+
+    func cmuxSetContainedFullscreenActive(_ active: Bool) {
+        guard cmuxContainedFullscreenActive != active else { return }
+        cmuxContainedFullscreenActive = active
+        onContainedFullscreenChanged?(active)
+    }
+
+    /// Clears presentation state when the owning document or WebView is replaced.
+    func cmuxResetContainedFullscreen() {
+        cmuxContainedFullscreenDocumentID = nil
+        cmuxSetContainedFullscreenActive(false)
+    }
+
+    /// Binds reports to the committed document without adding a round trip to actions.
+    func cmuxSynchronizeContainedFullscreenDocument() {
+        cmuxResetContainedFullscreen()
+        let documentID = UUID().uuidString
+        cmuxContainedFullscreenDocumentID = documentID
+        // UUID characters are safe inside this JavaScript string literal. Binding
+        // reports current page state, including an entry that preceded the handshake.
+        evaluateJavaScript("window.__cmuxContainedFullscreen?.bindNativeDocument('\(documentID)'); void 0")
+    }
+
+    private func handleContainedFullscreenEscape(_ event: NSEvent) -> Bool {
+        guard cmuxContainedFullscreenActive, event.keyCode == 53,
+              event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                .subtracting([.numericPad, .function, .capsLock]).isEmpty else { return false }
+        evaluateJavaScript("window.__cmuxContainedFullscreen?.exit(); void 0")
+        return true
+    }
+
     /// Called when "Open Link in New Tab" context menu is selected.
     /// Bypasses createWebViewWith so the link opens as a tab, not a popup.
     var onContextMenuOpenLinkInNewTab: ((URL) -> Void)?
@@ -639,6 +674,7 @@ final class CmuxWebView: WKWebView {
 #endif
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let normalizedFlags = flags.subtracting([.numericPad, .function, .capsLock])
+        if handleContainedFullscreenEscape(event) { return finish(true) }
         if let decision = AppDelegate.shared?.handleBrowserFocusModeKeyEvent(
             event,
             webView: self,
@@ -651,7 +687,7 @@ final class CmuxWebView: WKWebView {
                 let isReturnKey = event.keyCode == 36 || event.keyCode == 76
                 if (normalizedFlags.isEmpty && event.keyCode == 53) ||
                     (isReturnKey && !normalizedFlags.contains(.command)) {
-                    super.keyDown(with: event)
+                    forwardKeyDownToWebKit(event)
                     return finish(true)
                 }
                 let result = super.performKeyEquivalent(with: event)
@@ -686,12 +722,12 @@ final class CmuxWebView: WKWebView {
             return finish(result)
         }
 
-        var replayedBrowserDocumentEditingShortcutIntoWebContent = false
-        if shouldRouteBrowserDocumentEditingCommandEquivalentThroughWebContentFirst(
+        var replayedBrowserCommandShortcutIntoWebContent = false
+        if shouldRouteBrowserCommandEquivalentThroughWebContentFirst(
             event,
             responder: window?.firstResponder
         ) {
-            replayedBrowserDocumentEditingShortcutIntoWebContent = true
+            replayedBrowserCommandShortcutIntoWebContent = true
             let result = super.performKeyEquivalent(with: event)
             if result {
                 return finish(true)
@@ -711,6 +747,11 @@ final class CmuxWebView: WKWebView {
             }
         }
 
+        if shouldRouteInlineVSCodeCommandPaletteShortcutThroughWebContentFirst(event, pageURL: url) {
+            _ = super.performKeyEquivalent(with: event)
+            return finish(true)
+        }
+
         if !shouldRouteCommandEquivalentDirectlyToMainMenu(event) {
             return finish(super.performKeyEquivalent(with: event))
         }
@@ -724,7 +765,7 @@ final class CmuxWebView: WKWebView {
         }
 
         let result: Bool
-        if replayedBrowserDocumentEditingShortcutIntoWebContent || replayedBrowserFindShortcutIntoWebContent {
+        if replayedBrowserCommandShortcutIntoWebContent || replayedBrowserFindShortcutIntoWebContent {
             // A browser-first preflight has already exposed this shortcut to WebKit once.
             // Avoid a second `super.performKeyEquivalent` replay when menu/app fallback does not claim it.
             result = false
@@ -747,6 +788,12 @@ final class CmuxWebView: WKWebView {
             )
         }
 #endif
+        if handleContainedFullscreenEscape(event) {
+#if DEBUG
+            route = "containedFullscreenExit"
+#endif
+            return
+        }
         if let decision = AppDelegate.shared?.handleBrowserFocusModeKeyEvent(
             event,
             webView: self,
@@ -759,7 +806,7 @@ final class CmuxWebView: WKWebView {
 #if DEBUG
                 route = "focusModeWebView"
 #endif
-                super.keyDown(with: event)
+                forwardKeyDownToWebKit(event)
                 return
             case .consume:
 #if DEBUG
@@ -785,6 +832,17 @@ final class CmuxWebView: WKWebView {
             }
         }
 
+        // Inline VS Code owns Cmd+Shift+P for its in-page command palette.
+        // If this path reaches keyDown, forward it to WebKit instead of cmux.
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+           shouldRouteInlineVSCodeCommandPaletteShortcutThroughWebContentFirst(event, pageURL: url) {
+#if DEBUG
+            route = "inlineVSCode"
+#endif
+            forwardKeyDownToWebKit(event)
+            return
+        }
+
         // Some Cmd-based key paths in WebKit don't consistently invoke performKeyEquivalent.
         // Route them through the same app-level shortcut handler as a fallback.
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
@@ -795,7 +853,7 @@ final class CmuxWebView: WKWebView {
             return
         }
 
-        super.keyDown(with: event)
+        forwardKeyDownToWebKit(event)
     }
 
     // MARK: - Focus on click

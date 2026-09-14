@@ -190,6 +190,7 @@ Command palette navigation shortcuts, including ⌃ P, are also customizable and
 | Shortcut | Action |
 |----------|--------|
 | ⌘ ⇧ L | Open browser in split |
+| ⌘ T | New browser tab to right |
 | ⌘ L | Focus address bar |
 | ⌘ [ | Back |
 | ⌘ ] | Forward |

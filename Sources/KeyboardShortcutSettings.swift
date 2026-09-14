@@ -1,6 +1,8 @@
 import AppKit
 import Bonsplit
 import Carbon
+import CmuxSettings
+import CmuxSettingsUI
 import SwiftUI
 
 /// Stores customizable keyboard shortcuts (definitions + persistence).
@@ -57,7 +59,7 @@ enum KeyboardShortcutSettings {
         case rejected(ShortcutRecordingRejection)
     }
 
-    enum Action: String, CaseIterable, Identifiable {
+    enum Action: String, CaseIterable, Identifiable, Sendable {
         // App / window
         case openSettings
         case reloadConfiguration
@@ -119,9 +121,26 @@ enum KeyboardShortcutSettings {
         case focusRight
         case focusUp
         case focusDown
+        case moveTabLeft
+        case moveTabRight
+        case moveTabUp
+        case moveTabDown
         case splitRight
         case splitDown, toggleSplitZoom
         case equalizeSplits
+        case tilingTile
+        case tilingMonocle
+        case tilingToggleLayout
+        case tilingFocusNext
+        case tilingFocusPrevious
+        case tilingMoveNext
+        case tilingMovePrevious
+        case tilingPromote
+        case tilingIncreaseMasterCount
+        case tilingDecreaseMasterCount
+        case tilingIncreaseMasterRatio
+        case tilingDecreaseMasterRatio
+        case tilingManual
         case splitBrowserRight
         case splitBrowserDown
 
@@ -217,10 +236,27 @@ enum KeyboardShortcutSettings {
             case .focusRight: return String(localized: "shortcut.focusPaneRight.label", defaultValue: "Focus Pane Right")
             case .focusUp: return String(localized: "shortcut.focusPaneUp.label", defaultValue: "Focus Pane Up")
             case .focusDown: return String(localized: "shortcut.focusPaneDown.label", defaultValue: "Focus Pane Down")
+            case .moveTabLeft: return String(localized: "shortcut.moveTabLeft.label", defaultValue: "Move Tab Left")
+            case .moveTabRight: return String(localized: "shortcut.moveTabRight.label", defaultValue: "Move Tab Right")
+            case .moveTabUp: return String(localized: "shortcut.moveTabUp.label", defaultValue: "Move Tab Up")
+            case .moveTabDown: return String(localized: "shortcut.moveTabDown.label", defaultValue: "Move Tab Down")
             case .splitRight: return String(localized: "shortcut.splitRight.label", defaultValue: "Split Right")
             case .splitDown: return String(localized: "shortcut.splitDown.label", defaultValue: "Split Down")
             case .toggleSplitZoom: return String(localized: "shortcut.togglePaneZoom.label", defaultValue: "Toggle Pane Zoom")
             case .equalizeSplits: return String(localized: "shortcut.equalizeSplits.label", defaultValue: "Equalize Splits")
+            case .tilingTile: return String(localized: "shortcut.tilingTile.label", defaultValue: "Tiling: Master and Stack")
+            case .tilingMonocle: return String(localized: "shortcut.tilingMonocle.label", defaultValue: "Tiling: Monocle")
+            case .tilingToggleLayout: return String(localized: "shortcut.tilingToggleLayout.label", defaultValue: "Tiling: Toggle Layout")
+            case .tilingFocusNext: return String(localized: "shortcut.tilingFocusNext.label", defaultValue: "Tiling: Focus Next Pane")
+            case .tilingFocusPrevious: return String(localized: "shortcut.tilingFocusPrevious.label", defaultValue: "Tiling: Focus Previous Pane")
+            case .tilingMoveNext: return String(localized: "shortcut.tilingMoveNext.label", defaultValue: "Tiling: Move Pane Forward")
+            case .tilingMovePrevious: return String(localized: "shortcut.tilingMovePrevious.label", defaultValue: "Tiling: Move Pane Backward")
+            case .tilingPromote: return String(localized: "shortcut.tilingPromote.label", defaultValue: "Tiling: Promote Pane to Master")
+            case .tilingIncreaseMasterCount: return String(localized: "shortcut.tilingIncreaseMasterCount.label", defaultValue: "Tiling: More Master Panes")
+            case .tilingDecreaseMasterCount: return String(localized: "shortcut.tilingDecreaseMasterCount.label", defaultValue: "Tiling: Fewer Master Panes")
+            case .tilingIncreaseMasterRatio: return String(localized: "shortcut.tilingIncreaseMasterRatio.label", defaultValue: "Tiling: Widen Master Area")
+            case .tilingDecreaseMasterRatio: return String(localized: "shortcut.tilingDecreaseMasterRatio.label", defaultValue: "Tiling: Narrow Master Area")
+            case .tilingManual: return String(localized: "shortcut.tilingManual.label", defaultValue: "Tiling: Manual Layout")
             case .splitBrowserRight: return String(localized: "shortcut.splitBrowserRight.label", defaultValue: "Split Browser Right")
             case .splitBrowserDown: return String(localized: "shortcut.splitBrowserDown.label", defaultValue: "Split Browser Down")
             case .toggleRightSidebar: return String(localized: "shortcut.toggleRightSidebar.label", defaultValue: "Toggle Right Sidebar")
@@ -376,11 +412,24 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "↑", command: true, shift: false, option: true, control: false)
             case .focusDown:
                 return StoredShortcut(key: "↓", command: true, shift: false, option: true, control: false)
+            case .moveTabLeft:
+                return StoredShortcut(key: "←", command: true, shift: true, option: false, control: false)
+            case .moveTabRight:
+                return StoredShortcut(key: "→", command: true, shift: true, option: false, control: false)
+            case .moveTabUp:
+                return StoredShortcut(key: "↑", command: true, shift: true, option: false, control: false)
+            case .moveTabDown:
+                return StoredShortcut(key: "↓", command: true, shift: true, option: false, control: false)
             case .splitRight:
                 return StoredShortcut(key: "d", command: true, shift: false, option: false, control: false)
             case .splitDown: return StoredShortcut(key: "d", command: true, shift: true, option: false, control: false)
             case .toggleSplitZoom: return StoredShortcut(key: "\r", command: true, shift: true, option: false, control: false)
             case .equalizeSplits: return StoredShortcut(key: "=", command: true, shift: false, option: false, control: true)
+            case .tilingTile, .tilingMonocle, .tilingToggleLayout,
+                 .tilingFocusNext, .tilingFocusPrevious, .tilingMoveNext, .tilingMovePrevious,
+                 .tilingPromote, .tilingIncreaseMasterCount, .tilingDecreaseMasterCount,
+                 .tilingIncreaseMasterRatio, .tilingDecreaseMasterRatio, .tilingManual:
+                return .unbound
             case .splitBrowserRight:
                 return StoredShortcut(key: "d", command: true, shift: false, option: true, control: false)
             case .splitBrowserDown:
@@ -541,7 +590,20 @@ enum KeyboardShortcutSettings {
             proposedAction: Action,
             configuredShortcut: StoredShortcut
         ) -> Bool {
-            guard shortcutContext.overlaps(proposedAction.shortcutContext) else {
+            // Two bindings on the same keystroke only collide when some focus
+            // state activates both AND router priority cannot decide the overlap.
+            // A `shortcuts.when` override (or the built-in context default) can
+            // make them non-overlapping — e.g. ⌃1 selecting a workspace only when
+            // the sidebar is NOT focused coexists with the sidebar's ⌃1 (issue
+            // #5189) — and a pre-routed action (sidebar modes) wins its context
+            // outright, so the factory Select Surface ⌃1…9 coexists with the
+            // sidebar's ⌃1…5 by priority.
+            guard ShortcutWhenClause.bindingsCollide(
+                KeyboardShortcutSettings.effectiveWhenClause(for: self),
+                lhsHasPriority: hasPriorityShortcutRouting,
+                KeyboardShortcutSettings.effectiveWhenClause(for: proposedAction),
+                rhsHasPriority: proposedAction.hasPriorityShortcutRouting
+            ) else {
                 return false
             }
             return KeyboardShortcutSettings.shortcutsConflict(
@@ -1100,6 +1162,7 @@ final class SystemWideHotkeyController {
     private var defaultsObserver: NSObjectProtocol?
     private var shortcutObserver: NSObjectProtocol?
     private var recorderObserver: NSObjectProtocol?
+    private var packageRecorderObserver: NSObjectProtocol?
     private var inputSourceObserver: NSObjectProtocol?
     private var appHideObserver: NSObjectProtocol?
     private var registeredShortcuts: [KeyboardShortcutSettings.Action: StoredShortcut] = [:]
@@ -1133,6 +1196,19 @@ final class SystemWideHotkeyController {
         ) { [weak self] _ in
             self?.refreshRegistration()
         }
+        // The live Settings UI uses the CmuxSettingsUI package recorder, which
+        // signals arm/disarm through its own notification (it cannot post the
+        // app-target `KeyboardShortcutRecorderActivity` one). Without this,
+        // recording a system-wide hotkey in Settings would not unregister the
+        // existing Carbon hotkey, so the keystroke would fire the global action
+        // instead of being captured (issue #5189).
+        packageRecorderObserver = NotificationCenter.default.addObserver(
+            forName: RecorderHostButton.activeRecordingDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshRegistration()
+        }
         inputSourceObserver = DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name(rawValue: kTISNotifySelectedKeyboardInputSourceChanged as String),
             object: nil,
@@ -1154,7 +1230,11 @@ final class SystemWideHotkeyController {
     }
 
     private func refreshRegistration() {
+        // Stand down while either recorder is armed (legacy app-target recorder
+        // or the CmuxSettingsUI package recorder) so a system-wide hotkey being
+        // rebound in Settings is captured rather than fired.
         let isShortcutRecordingActive = KeyboardShortcutRecorderActivity.isAnyRecorderActive
+            || RecorderHostButton.isActivelyRecording
 
         guard !isShortcutRecordingActive else {
             unregisterHotKeys()
@@ -1391,47 +1471,26 @@ struct ShortcutStroke: Equatable, Hashable {
     }
 
     var displayString: String {
-        modifierDisplayString + keyDisplayString
+        ShortcutDisplayFormatter().strokeDisplayString(
+            key: key,
+            command: command,
+            shift: shift,
+            option: option,
+            control: control
+        )
     }
 
     var modifierDisplayString: String {
-        var parts: [String] = []
-        if control { parts.append("⌃") }
-        if option { parts.append("⌥") }
-        if shift { parts.append("⇧") }
-        if command { parts.append("⌘") }
-        return parts.joined()
+        ShortcutDisplayFormatter().modifierDisplayString(
+            command: command,
+            shift: shift,
+            option: option,
+            control: control
+        )
     }
 
     var keyDisplayString: String {
-        switch key {
-        case "\t":
-            return String(localized: "shortcut.key.tab", defaultValue: "Tab")
-        case "space": return String(localized: "shortcut.key.space", defaultValue: "Space")
-        case "\r":
-            return "↩"
-        case "media.brightnessDown":
-            return String(localized: "shortcut.key.mediaBrightnessDown", defaultValue: "Brightness Down")
-        case "media.brightnessUp":
-            return String(localized: "shortcut.key.mediaBrightnessUp", defaultValue: "Brightness Up")
-        case "media.mute":
-            return String(localized: "shortcut.key.mediaMute", defaultValue: "Mute")
-        case "media.next":
-            return String(localized: "shortcut.key.mediaNext", defaultValue: "Next Track")
-        case "media.playPause":
-            return String(localized: "shortcut.key.mediaPlayPause", defaultValue: "Play/Pause")
-        case "media.previous":
-            return String(localized: "shortcut.key.mediaPrevious", defaultValue: "Previous Track")
-        case "media.volumeDown":
-            return String(localized: "shortcut.key.mediaVolumeDown", defaultValue: "Volume Down")
-        case "media.volumeUp":
-            return String(localized: "shortcut.key.mediaVolumeUp", defaultValue: "Volume Up")
-        default:
-            if let functionKeyDisplayString = Self.functionKeyDisplayString(for: key) {
-                return functionKeyDisplayString
-            }
-            return key.uppercased()
-        }
+        ShortcutDisplayFormatter().keyDisplayString(key)
     }
 
     var modifierFlags: NSEvent.ModifierFlags {
@@ -2187,10 +2246,16 @@ struct StoredShortcut: Codable, Equatable, Hashable {
         if isUnbound {
             return displayString
         }
-        if hasChord {
-            return numberedDigitHintPrefix + "1…9"
+        if let secondStroke {
+            if ShortcutDisplayFormatter().isNumberedDigitKey(secondStroke.key) {
+                return numberedDigitHintPrefix + ShortcutDisplayFormatter().numberedDigitRangeHint
+            }
+            return displayString
         }
-        return firstStroke.modifierDisplayString + "1…9"
+        if ShortcutDisplayFormatter().isNumberedDigitKey(firstStroke.key) {
+            return firstStroke.modifierDisplayString + ShortcutDisplayFormatter().numberedDigitRangeHint
+        }
+        return displayString
     }
 
     var numberedDigitHintPrefix: String {
@@ -2267,157 +2332,43 @@ struct StoredShortcut: Codable, Equatable, Hashable {
 
 extension ShortcutStroke {
     static func parseConfig(_ rawValue: String) -> ShortcutStroke? {
-        guard !rawValue.isEmpty else { return nil }
-
-        let rawParts = rawValue.split(separator: "+", omittingEmptySubsequences: false)
-            .map(String.init)
-        let parts = rawParts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        guard !parts.isEmpty, let lastRawPart = rawParts.last, !lastRawPart.isEmpty else {
-            return nil
-        }
-
-        var command = false
-        var shift = false
-        var option = false
-        var control = false
-
-        for modifier in parts.dropLast() {
-            switch modifier.lowercased() {
-            case "cmd", "command", "⌘":
-                command = true
-            case "shift", "⇧":
-                shift = true
-            case "opt", "option", "alt", "⌥":
-                option = true
-            case "ctrl", "control", "ctl", "⌃":
-                control = true
-            default:
-                return nil
-            }
-        }
-
-        guard let key = parseConfigKeyToken(lastRawPart) else { return nil }
-        return ShortcutStroke(
-            key: key,
-            command: command,
-            shift: shift,
-            option: option,
-            control: control
-        )
+        CmuxSettings.ShortcutStroke.parseConfig(rawValue).map { ShortcutStroke(configuration: $0) }
     }
 
     func configString(preserveDigit: Bool = true) -> String {
-        var parts: [String] = []
-        if command { parts.append("cmd") }
-        if shift { parts.append("shift") }
-        if option { parts.append("opt") }
-        if control { parts.append("ctrl") }
-        parts.append(configKeyString(preserveDigit: preserveDigit))
-        return parts.joined(separator: "+")
+        CmuxSettings.ShortcutStroke(
+            key: key, command: command, shift: shift, option: option, control: control, keyCode: keyCode
+        ).configString(preserveDigit: preserveDigit)
     }
 
-    private func configKeyString(preserveDigit: Bool) -> String {
-        if preserveDigit {
-            return key
-        }
-        if let digit = Int(key), (1...9).contains(digit) {
-            return "1"
-        }
-        return key
-    }
-
-    private static func parseConfigKeyToken(_ rawValue: String) -> String? {
-        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            return rawValue == " " ? "space" : nil
-        }
-
-        let lowered = trimmed.lowercased()
-        switch lowered {
-        case "left", "arrowleft", "leftarrow", "←":
-            return "←"
-        case "right", "arrowright", "rightarrow", "→":
-            return "→"
-        case "up", "arrowup", "uparrow", "↑":
-            return "↑"
-        case "down", "arrowdown", "downarrow", "↓":
-            return "↓"
-        case "tab":
-            return "\t"
-        case "return", "enter", "↩":
-            return "\r"
-        case "space", "spacebar", "<space>":
-            return "space"
-        case "comma":
-            return ","
-        case "period", "dot":
-            return "."
-        case "slash":
-            return "/"
-        case "backslash":
-            return "\\"
-        case "semicolon":
-            return ";"
-        case "quote", "apostrophe":
-            return "'"
-        case "backtick", "grave":
-            return "`"
-        case "minus", "hyphen":
-            return "-"
-        case "plus", "equals":
-            return "="
-        case "leftbracket", "openbracket":
-            return "["
-        case "rightbracket", "closebracket":
-            return "]"
-        case "volumeup", "mediavolumeup", "media.volumeup":
-            return "media.volumeUp"
-        case "volumedown", "mediavolumedown", "media.volumedown":
-            return "media.volumeDown"
-        case "brightnessup", "mediabrightnessup", "media.brightnessup":
-            return "media.brightnessUp"
-        case "brightnessdown", "mediabrightnessdown", "media.brightnessdown":
-            return "media.brightnessDown"
-        case "mute", "mediamute", "media.mute":
-            return "media.mute"
-        case "playpause", "mediaplaypause", "media.playpause":
-            return "media.playPause"
-        case "nexttrack", "medianext", "media.next", "media.nexttrack":
-            return "media.next"
-        case "previoustrack", "mediaprevious", "media.previous", "media.previoustrack":
-            return "media.previous"
-        default:
-            if lowered.hasPrefix("f"),
-               let number = Int(lowered.dropFirst()),
-               (1...20).contains(number) {
-                return "f\(number)"
-            }
-            guard lowered.count == 1 else { return nil }
-            return lowered
-        }
+    init(configuration: CmuxSettings.ShortcutStroke) {
+        self.init(
+            key: configuration.key,
+            command: configuration.command,
+            shift: configuration.shift,
+            option: configuration.option,
+            control: configuration.control,
+            keyCode: configuration.keyCode
+        )
     }
 }
 
 extension StoredShortcut {
     static func parseConfig(_ rawValue: String, allowBareFirstStroke: Bool = false) -> StoredShortcut? {
-        if isUnboundConfigToken(rawValue) {
-            return .unbound
-        }
-        return parseConfig(strokes: [rawValue], allowBareFirstStroke: allowBareFirstStroke)
+        CmuxSettings.StoredShortcut.parseConfig(rawValue, allowBareFirstStroke: allowBareFirstStroke)
+            .map { StoredShortcut(configuration: $0) }
     }
 
     static func parseConfig(strokes: [String], allowBareFirstStroke: Bool = false) -> StoredShortcut? {
-        guard !strokes.isEmpty, strokes.count <= 2 else { return nil }
-        if strokes.count == 1, let rawValue = strokes.first, isUnboundConfigToken(rawValue) {
-            return .unbound
-        }
-        let parsedStrokes = strokes.compactMap(ShortcutStroke.parseConfig(_:))
-        guard parsedStrokes.count == strokes.count, let firstStroke = parsedStrokes.first else {
-            return nil
-        }
-        guard allowBareFirstStroke || !firstStroke.modifierFlags.isEmpty || firstStroke.key == "space" else { return nil }
-        let secondStroke = parsedStrokes.count == 2 ? parsedStrokes[1] : nil
-        return StoredShortcut(first: firstStroke, second: secondStroke)
+        CmuxSettings.StoredShortcut.parseConfig(strokes: strokes, allowBareFirstStroke: allowBareFirstStroke)
+            .map { StoredShortcut(configuration: $0) }
+    }
+
+    init(configuration: CmuxSettings.StoredShortcut) {
+        self.init(
+            first: ShortcutStroke(configuration: configuration.first),
+            second: configuration.second.map { ShortcutStroke(configuration: $0) }
+        )
     }
 
     var configIdentifier: String {
@@ -2426,14 +2377,6 @@ extension StoredShortcut {
             return "\(firstStroke.configString()) \(secondStroke.configString())"
         }
         return firstStroke.configString()
-    }
-
-    private static func isUnboundConfigToken(_ rawValue: String) -> Bool {
-        if rawValue.isEmpty { return true }
-        if rawValue == " " { return false }
-        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !normalized.isEmpty else { return true }
-        return normalized == "none" || normalized == "clear" || normalized == "unbound" || normalized == "disabled"
     }
 }
 

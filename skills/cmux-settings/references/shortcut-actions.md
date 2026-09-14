@@ -48,10 +48,27 @@ Values for `shortcuts.bindings.<action>`:
 - `shortcuts.bindings.focusRight`
 - `shortcuts.bindings.focusUp`
 - `shortcuts.bindings.focusDown`
+- `shortcuts.bindings.moveTabLeft`
+- `shortcuts.bindings.moveTabRight`
+- `shortcuts.bindings.moveTabUp`
+- `shortcuts.bindings.moveTabDown`
 - `shortcuts.bindings.splitRight`
 - `shortcuts.bindings.splitDown`
 - `shortcuts.bindings.toggleSplitZoom`
 - `shortcuts.bindings.equalizeSplits`
+- `shortcuts.bindings.tilingTile`
+- `shortcuts.bindings.tilingMonocle`
+- `shortcuts.bindings.tilingToggleLayout`
+- `shortcuts.bindings.tilingFocusNext`
+- `shortcuts.bindings.tilingFocusPrevious`
+- `shortcuts.bindings.tilingMoveNext`
+- `shortcuts.bindings.tilingMovePrevious`
+- `shortcuts.bindings.tilingPromote`
+- `shortcuts.bindings.tilingIncreaseMasterCount`
+- `shortcuts.bindings.tilingDecreaseMasterCount`
+- `shortcuts.bindings.tilingIncreaseMasterRatio`
+- `shortcuts.bindings.tilingDecreaseMasterRatio`
+- `shortcuts.bindings.tilingManual`
 
 ## Command palette
 

@@ -41,14 +41,21 @@ public struct StoredShortcut: Sendable, Equatable, Hashable, Codable, SettingCod
         (try? JSONEncoder().encode(self)) ?? Data()
     }
 
+    /// Reads documented strings, chords and null, or existing recorder objects.
+    ///
+    /// Action-specific first-stroke restrictions are applied by the shortcut
+    /// consumer; decoding the settings dictionary must also preserve bindings
+    /// for bare-key actions and action IDs added by newer app versions.
+    ///
+    /// - Parameter raw: The JSON value at a shortcut's binding key.
+    /// - Returns: The decoded shortcut, or nil for absent or malformed input.
     public static func decodeFromJSON(_ raw: Any?) -> StoredShortcut? {
-        guard let raw, !(raw is NSNull) else { return nil }
-        guard let data = try? JSONSerialization.data(withJSONObject: raw, options: .fragmentsAllowed) else {
-            return nil
-        }
-        return try? JSONDecoder().decode(StoredShortcut.self, from: data)
+        decodeConfiguration(raw, allowBareFirstStroke: true)
     }
 
+    /// Writes the recorder object form without discarding physical key codes.
+    ///
+    /// - Returns: A JSON-compatible object containing the first and optional second stroke.
     public func encodeForJSON() -> Any {
         guard let data = try? JSONEncoder().encode(self),
               let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {

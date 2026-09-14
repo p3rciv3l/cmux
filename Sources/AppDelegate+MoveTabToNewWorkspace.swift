@@ -1,3 +1,5 @@
+import AppKit
+import Bonsplit
 import Foundation
 
 struct SurfaceNewWorkspaceMoveResult {
@@ -34,6 +36,69 @@ extension AppDelegate {
             return false
         }
         return true
+    }
+
+    @discardableResult
+    func performMoveFocusedSurfaceShortcut(direction: SplitDirection, preferredWindow: NSWindow? = nil) -> Bool {
+        let targetWindow = preferredWindow ?? NSApp.keyWindow ?? NSApp.mainWindow
+        let targetTabManager = synchronizeActiveMainWindowContext(preferredWindow: targetWindow)
+        guard let targetTabManager,
+              let workspace = targetTabManager.selectedWorkspace,
+              let panelId = workspace.focusedPanelId else {
+            return false
+        }
+
+        if shouldSuppressSplitShortcutForTransientTerminalFocusState(
+            direction: direction,
+            tabManager: targetTabManager
+        ) {
+            return true
+        }
+
+        return moveSurfaceToNeighborOrSplit(
+            panelId: panelId,
+            workspace: workspace,
+            direction: direction,
+            focus: true,
+            focusWindow: false
+        )
+    }
+
+    @discardableResult
+    func moveSurfaceToNeighborOrSplit(
+        panelId: UUID,
+        workspace: Workspace,
+        direction: SplitDirection,
+        focus: Bool = true,
+        focusWindow: Bool = false
+    ) -> Bool {
+        guard workspace.panels[panelId] != nil,
+              let sourcePane = workspace.paneId(forPanelId: panelId) else {
+            return false
+        }
+
+        workspace.clearSplitZoom()
+        if let targetPane = workspace.bonsplitController.adjacentPane(
+            to: sourcePane,
+            direction: direction.navigationDirection
+        ) {
+            return moveSurface(
+                panelId: panelId,
+                toWorkspace: workspace.id,
+                targetPane: targetPane,
+                focus: focus,
+                focusWindow: focusWindow
+            )
+        }
+
+        return moveSurface(
+            panelId: panelId,
+            toWorkspace: workspace.id,
+            targetPane: sourcePane,
+            splitTarget: (orientation: direction.orientation, insertFirst: direction.insertFirst),
+            focus: focus,
+            focusWindow: focusWindow
+        )
     }
 
     func workspaceMoveTargets(forSurface panelId: UUID) -> [WorkspaceMoveTarget] {
@@ -186,5 +251,20 @@ extension AppDelegate {
         }
 
         return String(localized: "commandPalette.subtitle.tabFallback", defaultValue: "Tab")
+    }
+}
+
+private extension SplitDirection {
+    var navigationDirection: NavigationDirection {
+        switch self {
+        case .left:
+            return .left
+        case .right:
+            return .right
+        case .up:
+            return .up
+        case .down:
+            return .down
+        }
     }
 }

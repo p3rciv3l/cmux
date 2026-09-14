@@ -92,8 +92,36 @@ extension Workspace {
         return didChange
     }
 
+    private func connectCodexTitle(panelId: UUID, key: String, pid: pid_t) {
+        let sessionID = String(key.dropFirst("codex.".count))
+        guard !isRemoteWorkspace, !isRemoteTerminalSurface(panelId), UUID(uuidString: sessionID) != nil,
+              codexTitleSyncs[panelId]?.sessionID != sessionID else { return }
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &path, UInt32(path.count)) > 0 else { return }
+        let executable = URL(fileURLWithPath: String(cString: path))
+        guard executable.lastPathComponent == "codex" else { return }
+        let home = terminalPanel(for: panelId)?.surface.startupEnvironmentValue("CODEX_HOME")
+            ?? ProcessInfo.processInfo.environment["CODEX_HOME"]
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path
+        do {
+            codexTitleSyncs[panelId] = try CodexTabTitleSync(
+                sessionID: sessionID, executable: executable, home: URL(fileURLWithPath: home),
+                sessionNameChanged: { [weak self] name in
+                    guard let self else { return }
+                    self.setPanelCustomTitle(panelId: panelId, title: name)
+                },
+                failure: { error in NSLog("Codex tab title sync: %@", error) }
+            )
+            if let title = panelCustomTitles[panelId] {
+                codexTitleSyncs[panelId]?.rename(title)
+            }
+        } catch { NSLog("Codex tab title sync: %@", error.localizedDescription) }
+    }
+
+
     @discardableResult
     func recordAgentPID(key: String, pid: pid_t, panelId: UUID?, refreshPorts: Bool = true) -> Bool {
+        if let panelId, key.hasPrefix("codex.") { connectCodexTitle(panelId: panelId, key: key, pid: pid) }
         var didClearOtherStructuredAgentRuntime = false
         if let panelId {
             didClearOtherStructuredAgentRuntime = clearOtherStructuredAgentRuntimes(onPanel: panelId, keeping: key)
@@ -213,6 +241,9 @@ extension Workspace {
         if let panelId, let ownedPanelId, ownedPanelId != panelId {
             return false
         }
+        if let owner = ownedPanelId, key == "codex.\(codexTitleSyncs[owner]?.sessionID ?? "")" {
+            codexTitleSyncs.removeValue(forKey: owner)
+        }
         let statusKeyToClear = clearStatus ? agentStatusKey(forAgentPIDKey: key) : nil
 
         var didChange = false
@@ -303,6 +334,7 @@ extension Workspace {
         removePendingTerminalInputObservers(forPanelId: panelId)
         let transferredRemoteCleanupConfiguration = transferredRemoteCleanupConfigurationsByPanelId.removeValue(forKey: panelId)
         panelSubscriptions.removeValue(forKey: panelId)?.cancel()
+        discardAgentSessionPanelSubscription(panelId: panelId, panel: panel)
         removeBrowserOpenTabSuggestionIfNeeded(panel: panel, panelId: panelId)
         if cleanupControllerSurfaceState {
             TerminalController.shared.cleanupSurfaceState(surfaceIds: [panelId, tabId?.uuid].compactMap { $0 })

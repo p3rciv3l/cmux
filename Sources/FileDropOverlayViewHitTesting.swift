@@ -345,6 +345,9 @@ extension FileDropOverlayView {
         )
     }
 
+    // Keep the lazy pasteboard capture out of the caller's routing branches.
+    // Swift 6.3.3's CopyPropagation pass rejects that inlining in optimized Debug builds.
+    @inline(never)
     func logDragRouteDecision(
         phase: String,
         pasteboardTypes: [NSPasteboard.PasteboardType]?,

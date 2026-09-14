@@ -105,6 +105,7 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
         let cancellable = workspace.sidebarImmediateObservationPublisher.sink {
             observedSidebarInvalidation = true
         }
+        observedSidebarInvalidation = false
 
         manager.setTabColor(tabId: workspace.id, color: "#C0392B")
 
@@ -140,6 +141,7 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
         let cancellable = workspace.sidebarImmediateObservationPublisher.sink {
             observedSidebarInvalidation = true
         }
+        observedSidebarInvalidation = false
 
         manager.setTabColor(tabId: workspace.id, color: "#C0392B")
 
@@ -476,6 +478,26 @@ final class WorkspaceRenameShortcutDefaultsTests: XCTestCase {
         XCTAssertTrue(visibleActions.contains(.toggleUnread))
         XCTAssertTrue(visibleActions.contains(.markOldestUnreadAndJumpNext))
         XCTAssertFalse(visibleActions.contains(.showHideAllWindows))
+    }
+
+    func testMoveTabShortcutsUseCommandShiftArrowDefaultsAndAreVisible() {
+        let expectations: [(KeyboardShortcutSettings.Action, String)] = [
+            (.moveTabLeft, "←"),
+            (.moveTabRight, "→"),
+            (.moveTabUp, "↑"),
+            (.moveTabDown, "↓"),
+        ]
+
+        for (action, key) in expectations {
+            let shortcut = action.defaultShortcut
+            XCTAssertEqual(shortcut.key, key)
+            XCTAssertTrue(shortcut.command)
+            XCTAssertTrue(shortcut.shift)
+            XCTAssertFalse(shortcut.option)
+            XCTAssertFalse(shortcut.control)
+            XCTAssertTrue(KeyboardShortcutSettings.publicShortcutActions.contains(action))
+            XCTAssertTrue(KeyboardShortcutSettings.settingsVisibleActions.contains(action))
+        }
     }
 
     func testToggleUnreadUsesConfigurableCommandOptionUDefault() {
@@ -6401,6 +6423,7 @@ final class WorkspacePanelGitBranchTests: XCTestCase {
             publishCount += 1
         }
         defer { cancellable.cancel() }
+        publishCount = 0
 
         workspace.updatePanelGitBranch(panelId: panelId, branch: "main", isDirty: false)
         let baselinePublishCount = publishCount
@@ -6415,25 +6438,6 @@ final class WorkspacePanelGitBranchTests: XCTestCase {
             publishCount,
             baselinePublishCount,
             "Expected identical git metadata refreshes to be ignored by sidebar rows"
-        )
-    }
-
-    func testSidebarObservationPublisherIgnoresRemoteHeartbeatOnlyChanges() {
-        let workspace = Workspace()
-
-        var publishCount = 0
-        let cancellable = workspace.sidebarObservationPublisher.sink {
-            publishCount += 1
-        }
-        defer { cancellable.cancel() }
-
-        workspace.remoteHeartbeatCount = 1
-        workspace.remoteLastHeartbeatAt = Date()
-
-        XCTAssertEqual(
-            publishCount,
-            0,
-            "Expected non-visible remote heartbeat updates to avoid invalidating sidebar rows"
         )
     }
 

@@ -1568,6 +1568,18 @@ struct CmuxResolvedConfigAction: Identifiable, Sendable, Hashable {
         case .splitDown:
             title = String(localized: "command.terminalSplitDown.title", defaultValue: "Split Down")
             keywords = ["terminal", "split", "down"]
+        case .moveTabLeft:
+            title = String(localized: "command.moveTabLeft.title", defaultValue: "Move Tab Left")
+            keywords = ["move", "tab", "surface", "pane", "left"]
+        case .moveTabRight:
+            title = String(localized: "command.moveTabRight.title", defaultValue: "Move Tab Right")
+            keywords = ["move", "tab", "surface", "pane", "right"]
+        case .moveTabUp:
+            title = String(localized: "command.moveTabUp.title", defaultValue: "Move Tab Up")
+            keywords = ["move", "tab", "surface", "pane", "up"]
+        case .moveTabDown:
+            title = String(localized: "command.moveTabDown.title", defaultValue: "Move Tab Down")
+            keywords = ["move", "tab", "surface", "pane", "down"]
         }
 
         return CmuxResolvedConfigAction(

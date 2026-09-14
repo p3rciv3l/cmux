@@ -325,6 +325,7 @@ final class CmuxWebViewKeyEquivalentTests: XCTestCase {
             testFieldEditor
         }
     }
+
     func testCmdNRoutesToMainMenuWhenWebViewIsFirstResponder() {
         let spy = ActionSpy()
         installMenu(spy: spy, key: "n", modifiers: [.command])

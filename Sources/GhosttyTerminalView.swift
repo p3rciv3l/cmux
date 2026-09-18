@@ -5454,6 +5454,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
     let initialCommand: String?
     let tmuxStartCommand: String?
     let initialInput: String?
+    /// Set once the surface has received interactive input. This is intentionally
+    /// semantic rather than time-based so browser replacement remains predictable
+    /// after slow startup, restoration, or background surface creation.
+    private(set) var hasReceivedUserInput = false
     private var nextRuntimeInitialInput: String?
     private let initialEnvironmentOverrides: [String: String]
     var requestedWorkingDirectory: String? { workingDirectory }
@@ -5820,6 +5824,10 @@ final class TerminalSurface: Identifiable, ObservableObject {
 
     func debugCreatedAt() -> Date {
         withDebugMetadataLock { createdAt }
+    }
+
+    func noteUserInput() {
+        hasReceivedUserInput = true
     }
 
     func debugRuntimeSurfaceCreatedAt() -> Date? {
@@ -7214,11 +7222,20 @@ final class TerminalSurface: Identifiable, ObservableObject {
     @MainActor
     @discardableResult
     func sendText(_ text: String) -> Bool {
+        sendText(text, countsAsUserInput: true)
+    }
+
+    /// App-owned welcome output must not make an untouched terminal look used.
+    /// Explicit user and automation input use the default sendText entrypoint.
+    @MainActor
+    @discardableResult
+    func sendText(_ text: String, countsAsUserInput: Bool) -> Bool {
         guard let data = text.data(using: .utf8), !data.isEmpty else { return true }
         guard surface != nil else {
             guard allowsRuntimeSurfaceCreation() else { return false }
             let queued = enqueuePendingSocketInput(.pasteText(data))
             if queued {
+                if countsAsUserInput { noteUserInput() }
                 recordAgentHibernationTerminalInput(workspaceId: tabId, panelId: id)
                 requestBackgroundSurfaceStartIfNeeded()
             }
@@ -7228,6 +7245,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             return false
         }
         guard !ghostty_surface_process_exited(liveSurface) else { return false }
+        if countsAsUserInput { noteUserInput() }
         recordAgentHibernationTerminalInput(workspaceId: tabId, panelId: id)
         writeTextData(data, to: liveSurface)
         return true
@@ -7241,6 +7259,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             return false
         }
         guard !ghostty_surface_process_exited(liveSurface) else { return false }
+        noteUserInput()
 
         var keyEvent = ghostty_input_key_s()
         keyEvent.action = GHOSTTY_ACTION_PRESS
@@ -7262,6 +7281,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
         guard surface != nil else {
             guard allowsRuntimeSurfaceCreation() else { return .surfaceUnavailable }
             guard enqueuePendingSocketInput(.key(event)) else { return .inputQueueFull }
+            noteUserInput()
             recordAgentHibernationTerminalInput(workspaceId: tabId, panelId: id)
             requestBackgroundSurfaceStartIfNeeded()
             return .queued
@@ -7270,6 +7290,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             return .surfaceUnavailable
         }
         guard !ghostty_surface_process_exited(liveSurface) else { return .processExited }
+        noteUserInput()
         recordAgentHibernationTerminalInput(workspaceId: tabId, panelId: id)
         sendKeyEvent(surface: liveSurface, keycode: event.keycode, mods: event.mods)
         return .sent
@@ -7337,6 +7358,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             guard allowsRuntimeSurfaceCreation() else { return .surfaceUnavailable }
             let queued = enqueuePendingSocketInput(text)
             if queued {
+                noteUserInput()
                 recordAgentHibernationTerminalInput(workspaceId: tabId, panelId: id)
                 requestBackgroundSurfaceStartIfNeeded()
             }
@@ -7346,6 +7368,7 @@ final class TerminalSurface: Identifiable, ObservableObject {
             return .surfaceUnavailable
         }
         guard !ghostty_surface_process_exited(liveSurface) else { return .processExited }
+        noteUserInput()
         recordAgentHibernationTerminalInput(workspaceId: tabId, panelId: id)
         sendInput(text, to: liveSurface)
         return .sent
@@ -10071,6 +10094,7 @@ class GhosttyNSView: NSView, NSUserInterfaceValidations {
             return
         }
         if let terminalSurface {
+            terminalSurface.noteUserInput()
 #if DEBUG
             let dismissNotificationStart = ProcessInfo.processInfo.systemUptime
 #endif
@@ -15573,6 +15597,9 @@ extension GhosttyNSView: NSTextInputClient {
     /// automation payloads remain byte-for-byte stable.
     fileprivate func sendTextToSurface(_ chars: String, preserveLiteralEscape: Bool) {
         guard let surface = surface else { return }
+        if !chars.isEmpty {
+            terminalSurface?.noteUserInput()
+        }
 #if DEBUG
         let typingTimingStart = CmuxTypingTiming.start()
 #endif

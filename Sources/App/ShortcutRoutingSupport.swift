@@ -207,8 +207,8 @@ func shouldDispatchCommandPaletteHorizontalArrowViaFirstResponderKeyDown(
 /// Owns the four arrows (keyCodes 123–126) for the modifier combos a text
 /// editor handles itself: plain (move), Shift (extend selection), Option
 /// (word/paragraph), and Command (line/document boundary) plus their Shift
-/// combos. Cmd+Option+Arrow is excluded so it still reaches cmux's pane-focus
-/// shortcuts. Marked text (IME composition) is left to the input method.
+/// combos. Cmd+Option+Arrow is excluded so it still reaches cmux's surface or
+/// pane-focus shortcuts. Marked text (IME composition) is left to the input method.
 private func standaloneTextResponderOwnsArrowKeyDown(
     keyCode: UInt16,
     firstResponderHasMarkedText: Bool,

@@ -16,6 +16,38 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct WorkspaceTilingTests {
+    @Test
+    func newWorkspaceStartsTiledAndNewSplitsBecomeMaster() throws {
+        let workspace = Workspace(initialTerminalCommand: "/usr/bin/true")
+        defer { dispose(workspace) }
+        let controller = workspace.bonsplitController
+        #expect(controller.tilingLayout == .tile)
+        let original = try #require(workspace.focusedPanelId)
+        let added = try #require(workspace.newTerminalSplit(
+            from: original, orientation: .vertical, focus: false, initialCommand: "/usr/bin/true"
+        ))
+        #expect(controller.allPaneIds.first == workspace.paneId(forPanelId: added.id))
+        #expect(controller.masterCount == 1)
+        #expect(controller.masterRatio == 0.55)
+    }
+
+    @Test(arguments: [false, true])
+    func legacySessionEnablesTilingButNewExplicitManualChoiceSurvivesRestore(legacy: Bool) throws {
+        let workspace = try fixture()
+        defer { dispose(workspace) }
+        var snapshot = workspace.sessionSnapshot(includeScrollback: false)
+        #expect(snapshot.tiling?.layout == .manual)
+        snapshot.tilingDefaultsVersion = legacy ? nil : 1
+        let encoded = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(SessionWorkspaceSnapshot.self, from: encoded)
+        let restored = Workspace(initialTerminalCommand: "/usr/bin/true")
+        defer { dispose(restored) }
+        _ = restored.restoreSessionSnapshot(decoded)
+        #expect(restored.bonsplitController.tilingLayout == (legacy ? .tile : .manual))
+        #expect(restored.panels.count == workspace.panels.count)
+        #expect(restored.sessionSnapshot(includeScrollback: false).tilingDefaultsVersion == 1)
+    }
+
     @Test(arguments: PaneTilingAction.allCases)
     func everyActionPreservesTerminalPanelsSurfacesAndTabs(action: PaneTilingAction) throws {
         let workspace = try fixture()
@@ -841,6 +873,8 @@ struct WorkspaceTilingTests {
 
     private func fixture() throws -> Workspace {
         let workspace = Workspace(initialTerminalCommand: "/usr/bin/true")
+        // These tests exercise switching away from a hand-built manual layout.
+        _ = workspace.performTilingAction(.manual)
         workspace.setPortalRenderingEnabled(false, reason: "test.workspaceTiling")
         let firstPanel = try #require(workspace.focusedPanelId)
         let secondPanel = try #require(workspace.newTerminalSplit(

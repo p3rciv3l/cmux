@@ -1,3 +1,4 @@
+import Testing
 import Darwin
 import XCTest
 
@@ -3312,5 +3313,75 @@ final class TabManagerSessionSnapshotTests: XCTestCase {
             filePreview: nil,
             rightSidebarTool: nil
         )
+    }
+}
+
+
+@Suite("Workspace duplication", .serialized)
+@MainActor
+struct WorkspaceDuplicationTests {
+    @Test
+    func duplicatesSelectionWithFreshPanelIdentitiesAndPreservesSources() async throws {
+        let manager = TabManager()
+        defer { manager.tabs.forEach { $0.teardownAllPanels() } }
+        let first = try #require(manager.selectedWorkspace)
+        first.setCustomTitle("Same name")
+        first.setCustomDescription("Workspace notes")
+        let pane = try #require(first.bonsplitController.allPaneIds.first)
+        _ = try #require(first.newTerminalSurface(inPane: pane, focus: true, workingDirectory: "/tmp"))
+        _ = try #require(first.splitPaneWithNewTerminal(targetPane: pane, orientation: .horizontal, insertFirst: false, workingDirectory: "/tmp", initialInput: nil))
+        let second = manager.addWorkspace(title: "Second", autoWelcomeIfNeeded: false)
+        let unselected = manager.addWorkspace(title: "Unselected", select: false, autoWelcomeIfNeeded: false)
+        manager.setSidebarSelectedWorkspaceIds([first.id, second.id])
+        let originalPanelIds = Set(first.panels.keys)
+        let copies = await manager.duplicateWorkspaces()
+        #expect(copies.count == 2)
+        #expect(manager.tabs.map(\.id) == [first.id, copies[0].id, second.id, copies[1].id, unselected.id])
+        #expect(copies[0].title == first.title)
+        #expect(copies[0].customDescription == first.customDescription)
+        #expect(copies[0].panels.count == first.panels.count)
+        #expect(copies[0].bonsplitController.allPaneIds.count == first.bonsplitController.allPaneIds.count)
+        #expect(Set(copies[0].panels.keys).isDisjoint(with: originalPanelIds))
+        #expect(Set(first.panels.keys) == originalPanelIds)
+        #expect(manager.selectedTabId == copies[1].id)
+        #expect(manager.sidebarSelectedWorkspaceIds == [copies[1].id])
+        let single = await manager.duplicateWorkspaces()
+        #expect(single.count == 1)
+        #expect(single.first?.title == second.title)
+    }
+
+    @Test
+    func duplicateSnapshotKeepsCodexIdentityButDropsTerminalAttachmentsAndActivity() throws {
+        let workspace = Workspace()
+        defer { workspace.teardownAllPanels() }
+        var snapshot = workspace.sessionSnapshot(includeScrollback: false)
+        let panelIndex = try #require(snapshot.panels.firstIndex(where: { $0.type == .terminal }))
+        snapshot.panels[panelIndex].terminal = SessionTerminalPanelSnapshot(
+            workingDirectory: "/tmp",
+            scrollback: "old output",
+            agent: SessionRestorableAgentSnapshot(kind: .codex, sessionId: "existing-conversation", workingDirectory: "/tmp", launchCommand: nil),
+            tmuxStartCommand: "tmux attach",
+            hibernation: SessionAgentHibernationSnapshot(hibernatedAt: 1, lastActivityAt: 1),
+            remotePTYSessionID: "original-pty",
+            wasAgentRunning: false
+        )
+        snapshot.isManuallyUnread = true
+        snapshot.hasUnreadIndicator = true
+        snapshot.progress = SessionProgressSnapshot(value: 0.5, label: "Running")
+        let duplicate = snapshot.forWorkspaceDuplication()
+        let terminal = try #require(duplicate.panels[panelIndex].terminal)
+        #expect(terminal.agent?.sessionId == "existing-conversation")
+        #expect(terminal.agent?.resumeCommand?.contains("resume") == true)
+        #expect(terminal.workingDirectory == "/tmp")
+        #expect(terminal.scrollback == nil)
+        #expect(terminal.tmuxStartCommand == nil)
+        #expect(terminal.hibernation == nil)
+        #expect(terminal.remotePTYSessionID == nil)
+        #expect(terminal.resumeBinding == nil)
+        #expect(duplicate.workspaceId == nil)
+        #expect(duplicate.isManuallyUnread == false)
+        #expect(duplicate.hasUnreadIndicator == false)
+        #expect(duplicate.progress == nil)
+        #expect(snapshot.panels[panelIndex].terminal?.remotePTYSessionID == "original-pty")
     }
 }

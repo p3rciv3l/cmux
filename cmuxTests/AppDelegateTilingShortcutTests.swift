@@ -14,11 +14,17 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct AppDelegateTilingShortcutTests {
-    @Test(arguments: PaneTilingAction.allCases)
-    func configuredActionDispatchesOnceAndPreservesPaneContents(action: PaneTilingAction) throws {
+    @Test(arguments: PaneTilingAction.allCases, [false, true])
+    func configuredActionDispatchesOnceAndPreservesPaneContents(action: PaneTilingAction, useDefault: Bool) throws {
         try withEnvironment { app, configURL in
             let shortcutAction = try #require(KeyboardShortcutSettings.tilingActions.first { $0.tilingAction == action })
-            try configure(configURL, bindings: [shortcutAction.rawValue: "cmd+ctrl+opt+t"])
+            if useDefault {
+                // Exercise fallback defaults with every real neighboring binding enabled.
+                try JSONSerialization.data(withJSONObject: ["schemaVersion": 1]).write(to: configURL, options: .atomic)
+                KeyboardShortcutSettings.settingsFileStore.reload()
+            } else {
+                try configure(configURL, bindings: [shortcutAction.rawValue: "cmd+ctrl+opt+t"])
+            }
             try withWorkspace(app) { window, _, workspace in
                 let controller = workspace.bonsplitController
                 let manualPanes = controller.layoutSnapshot().panes
@@ -31,7 +37,19 @@ struct AppDelegateTilingShortcutTests {
                 let selectedTabs = order.map { controller.selectedTab(inPane: $0)?.id }
                 let sequence = workspace.debugTilingActionCountForTesting
 
-                let shortcutEvent = try event(window)
+                let shortcutEvent: NSEvent
+                if useDefault {
+                    let shortcut = shortcutAction.defaultShortcut
+                    let keys: [String: (String, UInt16)] = [
+                        "t": ("t", 17), "m": ("m", 46), "l": ("l", 37), "0": ("0", 29),
+                        "\r": ("\r", 36), "←": ("\u{f702}", 123), "→": ("\u{f703}", 124),
+                        "↑": ("\u{f700}", 126), "↓": ("\u{f701}", 125)
+                    ]
+                    let key = try #require(keys[shortcut.key])
+                    shortcutEvent = try event(window, key: key.0, keyCode: key.1, modifiers: shortcut.modifierFlags)
+                } else {
+                    shortcutEvent = try event(window)
+                }
                 #expect(app.debugHandleShortcutMonitorEvent(event: shortcutEvent))
 
                 #expect(workspace.debugTilingActionCountForTesting == sequence + 1)
@@ -247,6 +265,7 @@ struct AppDelegateTilingShortcutTests {
     private func withWorkspace(_ app: AppDelegate, _ body: (NSWindow, TabManager, Workspace) throws -> Void) throws {
         let manager = TabManager(initialWorkingDirectory: "/private/tmp", autoWelcomeIfNeeded: false)
         let workspace = try #require(manager.selectedWorkspace)
+        _ = workspace.performTilingAction(.manual)
         workspace.debugTracksTilingActionsForTesting = true
         workspace.setPortalRenderingEnabled(false, reason: "test.tilingShortcut")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled], backing: .buffered, defer: false)

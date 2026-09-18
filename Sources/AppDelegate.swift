@@ -8311,7 +8311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func sendWelcomeCommandWhenReady(to workspace: Workspace, markShownOnSend: Bool = false) {
-        sendTextWhenReady("cmux welcome\n", to: workspace, beforeSend: {
+        sendTextWhenReady("cmux welcome\n", to: workspace, countsAsUserInput: false, beforeSend: {
             if markShownOnSend {
                 UserDefaults.standard.set(true, forKey: WelcomeSettings.shownKey)
             }
@@ -8923,6 +8923,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         _ text: String,
         to tab: Tab,
         preferredPanelId: UUID? = nil,
+        countsAsUserInput: Bool = true,
         beforeSend: (() -> Void)? = nil,
         onFailure: (() -> Void)? = nil
     ) {
@@ -8950,7 +8951,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         ),
            terminalPanel.isAgentHibernated {
             beforeSend?()
-            if !terminalPanel.sendText(text) {
+            if !terminalPanel.sendText(text, countsAsUserInput: countsAsUserInput) {
                 onFailure?()
             }
             return
@@ -8971,7 +8972,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
 #endif
             beforeSend?()
-            let didSend = terminalPanel.sendText(text)
+            let didSend = terminalPanel.sendText(text, countsAsUserInput: countsAsUserInput)
 #if DEBUG
             if isReactGrabPasteback, didSend {
                 cmuxDebugLog(
@@ -9029,7 +9030,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             resolved = true
             cleanupObservers()
             beforeSend?()
-            let didSend = terminalPanel.sendText(text)
+            let didSend = terminalPanel.sendText(text, countsAsUserInput: countsAsUserInput)
 #if DEBUG
             if isReactGrabPasteback, didSend {
                 cmuxDebugLog(
@@ -12957,6 +12958,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             cmuxRememberFindSelectionBeforePanelFocusMove(tabManager: tabManager, window: shortcutWindow ?? NSApp.keyWindow); return performFindShortcutInActiveMainWindow(preferredWindow: shortcutWindow)
         }
 
+        if matchConfiguredShortcut(event: event, action: .duplicateWorkspace) {
+            let manager = preferredMainWindowContextForShortcutRouting(event: event)?.tabManager ?? tabManager
+            // Holding the key must not recursively duplicate freshly-created workspaces.
+            if !event.isARepeat {
+                Task { await manager?.duplicateWorkspaces() }
+            }
+            return manager != nil
+        }
+
         // Keep keyboard routing deterministic after split close/reparent transitions:
         // before processing shortcuts, converge first responder with the focused terminal panel.
         if isControlD {
@@ -12972,7 +12982,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             cmuxDebugLog("shortcut.ctrlD stage=postReconcile fr=\(frAfterType)")
             writeChildExitKeyboardProbe([:], increments: ["probeAppShortcutCtrlDPassedCount": 1])
             #endif
-            // Ctrl+D belongs to the focused terminal surface; never treat it as an app shortcut.
+            // When duplication is unbound or rebound, preserve terminal Ctrl+D behavior.
             return false
         }
         // Chrome-like omnibar navigation while holding Ctrl+N / Ctrl+P.
@@ -13210,14 +13220,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return true
         }
 
-        // Surface navigation: Cmd+Shift+] / Cmd+Shift+[
+        let shortcutTargetManager = preferredMainWindowContextForShortcutRouting(event: event)?.tabManager ?? tabManager
+
+        // Horizontal surface navigation shares Cmd+Option+Arrow with pane focus.
+        // When the focused pane has multiple surfaces, the surface action wins;
+        // with one surface, execution falls through to pane focus below.
         if matchConfiguredShortcut(event: event, action: .nextSurface) {
-            tabManager?.selectNextSurface()
-            return true
+            let alsoFocusesPane = matchConfiguredDirectionalShortcut(
+                event: event,
+                action: .focusRight,
+                arrowGlyph: "→",
+                arrowKeyCode: 124
+            )
+            if shortcutTargetManager?.selectedWorkspace?.hasMultipleSurfacesInFocusedPane == true || !alsoFocusesPane {
+                shortcutTargetManager?.selectNextSurface()
+                return true
+            }
         }
         if matchConfiguredShortcut(event: event, action: .prevSurface) {
-            tabManager?.selectPreviousSurface()
-            return true
+            let alsoFocusesPane = matchConfiguredDirectionalShortcut(
+                event: event,
+                action: .focusLeft,
+                arrowGlyph: "←",
+                arrowKeyCode: 123
+            )
+            if shortcutTargetManager?.selectedWorkspace?.hasMultipleSurfacesInFocusedPane == true || !alsoFocusesPane {
+                shortcutTargetManager?.selectPreviousSurface()
+                return true
+            }
         }
 
         if matchConfiguredShortcut(event: event, action: .toggleTerminalCopyMode) {
@@ -13428,7 +13458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             arrowGlyph: "←",
             arrowKeyCode: 123
         ) || (ghosttyGotoSplitLeftShortcut.map { matchDirectionalShortcut(event: event, shortcut: $0, arrowGlyph: "←", arrowKeyCode: 123) } ?? false) {
-            cmuxRememberFindSelectionBeforePanelFocusMove(tabManager: tabManager, window: NSApp.keyWindow); tabManager?.movePaneFocus(direction: .left)
+            cmuxRememberFindSelectionBeforePanelFocusMove(tabManager: shortcutTargetManager, window: NSApp.keyWindow); shortcutTargetManager?.movePaneFocus(direction: .left)
 #if DEBUG
             recordGotoSplitMoveIfNeeded(direction: .left)
 #endif
@@ -13440,7 +13470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             arrowGlyph: "→",
             arrowKeyCode: 124
         ) || (ghosttyGotoSplitRightShortcut.map { matchDirectionalShortcut(event: event, shortcut: $0, arrowGlyph: "→", arrowKeyCode: 124) } ?? false) {
-            cmuxRememberFindSelectionBeforePanelFocusMove(tabManager: tabManager, window: NSApp.keyWindow); tabManager?.movePaneFocus(direction: .right)
+            cmuxRememberFindSelectionBeforePanelFocusMove(tabManager: shortcutTargetManager, window: NSApp.keyWindow); shortcutTargetManager?.movePaneFocus(direction: .right)
 #if DEBUG
             recordGotoSplitMoveIfNeeded(direction: .right)
 #endif
@@ -13452,7 +13482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             arrowGlyph: "↑",
             arrowKeyCode: 126
         ) || (ghosttyGotoSplitUpShortcut.map { matchDirectionalShortcut(event: event, shortcut: $0, arrowGlyph: "↑", arrowKeyCode: 126) } ?? false) {
-            cmuxRememberFindSelectionBeforePanelFocusMove(tabManager: tabManager, window: NSApp.keyWindow); tabManager?.movePaneFocus(direction: .up)
+            cmuxRememberFindSelectionBeforePanelFocusMove(tabManager: shortcutTargetManager, window: NSApp.keyWindow); shortcutTargetManager?.movePaneFocus(direction: .up)
 #if DEBUG
             recordGotoSplitMoveIfNeeded(direction: .up)
 #endif
@@ -13464,7 +13494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             arrowGlyph: "↓",
             arrowKeyCode: 125
         ) || (ghosttyGotoSplitDownShortcut.map { matchDirectionalShortcut(event: event, shortcut: $0, arrowGlyph: "↓", arrowKeyCode: 125) } ?? false) {
-            cmuxRememberFindSelectionBeforePanelFocusMove(tabManager: tabManager, window: NSApp.keyWindow); tabManager?.movePaneFocus(direction: .down)
+            cmuxRememberFindSelectionBeforePanelFocusMove(tabManager: shortcutTargetManager, window: NSApp.keyWindow); shortcutTargetManager?.movePaneFocus(direction: .down)
 #if DEBUG
             recordGotoSplitMoveIfNeeded(direction: .down)
 #endif
@@ -13607,13 +13637,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         // New surface: Cmd+T
         if matchConfiguredShortcut(event: event, action: .newSurface) {
-            tabManager?.newSurface()
+            if shortcutEventBrowserPanel(event) != nil {
+                _ = openBrowserAndFocusAddressBar(
+                    insertAtEnd: true,
+                    preferredTabManager: shortcutTargetManager
+                )
+            } else {
+                shortcutTargetManager?.newSurface()
+            }
             return true
         }
 
         // Open browser: Cmd+Shift+L
         if matchConfiguredShortcut(event: event, action: .openBrowser) {
-            _ = openBrowserAndFocusAddressBar(insertAtEnd: true)
+            _ = openBrowserAndFocusAddressBar(
+                insertAtEnd: true,
+                preferredTabManager: shortcutTargetManager,
+                replaceFreshTerminalSurface: true
+            )
             return true
         }
 
@@ -13900,9 +13941,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 #endif
 
     @discardableResult
-    private func focusBrowserAddressBar(panelId: UUID) -> Bool {
-        guard let tabManager,
-              let workspace = tabManager.selectedWorkspace,
+    private func focusBrowserAddressBar(panelId: UUID, in preferredTabManager: TabManager? = nil) -> Bool {
+        let routedTabManager = preferredTabManager ?? tabManager
+        guard let routedTabManager,
+              let workspace = routedTabManager.selectedWorkspace,
               let panel = workspace.browserPanel(for: panelId) else {
 #if DEBUG
             cmuxDebugLog(
@@ -13931,7 +13973,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     @discardableResult
-    func openBrowserAndFocusAddressBar(url: URL? = nil, insertAtEnd: Bool = false) -> UUID? {
+    func openBrowserAndFocusAddressBar(
+        url: URL? = nil,
+        insertAtEnd: Bool = false,
+        preferredTabManager: TabManager? = nil,
+        replaceFreshTerminalSurface: Bool = false
+    ) -> UUID? {
         guard BrowserAvailabilitySettings.isEnabled() else {
 #if DEBUG
             cmuxDebugLog(
@@ -13942,10 +13989,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return nil
         }
 
+        let routedTabManager = preferredTabManager ?? tabManager
         let preferredProfileID =
-            tabManager?.focusedBrowserPanel?.profileID
-            ?? tabManager?.selectedWorkspace?.preferredBrowserProfileID
-        guard let panelId = tabManager?.openBrowser(
+            routedTabManager?.focusedBrowserPanel?.profileID
+            ?? routedTabManager?.selectedWorkspace?.preferredBrowserProfileID
+
+        if replaceFreshTerminalSurface,
+           let browserPanel = routedTabManager?.selectedWorkspace?.replaceFreshTerminalSurfaceWithBrowser(
+               url: url,
+               preferredProfileID: preferredProfileID
+           ) {
+            let panelId = browserPanel.id
+#if DEBUG
+            cmuxDebugLog(
+                "browser.focus.openAndFocus result=replaced_fresh_terminal panel=\(panelId.uuidString.prefix(5)) " +
+                "insertAtEnd=\(insertAtEnd ? 1 : 0) url=\(redactedDebugURL(url))"
+            )
+#endif
+            _ = focusBrowserAddressBar(panelId: panelId, in: routedTabManager)
+            return panelId
+        }
+
+        guard let panelId = routedTabManager?.openBrowser(
             url: url,
             preferredProfileID: preferredProfileID,
             insertAtEnd: insertAtEnd
@@ -13965,13 +14030,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         )
 #endif
 #if DEBUG
-        let didFocus = focusBrowserAddressBar(panelId: panelId)
+        let didFocus = focusBrowserAddressBar(panelId: panelId, in: routedTabManager)
         cmuxDebugLog(
             "browser.focus.openAndFocus result=focus_request panel=\(panelId.uuidString.prefix(5)) " +
             "focused=\(didFocus ? 1 : 0) \(browserFocusStateSnapshot())"
         )
 #else
-        _ = focusBrowserAddressBar(panelId: panelId)
+        _ = focusBrowserAddressBar(panelId: panelId, in: routedTabManager)
 #endif
         return panelId
     }

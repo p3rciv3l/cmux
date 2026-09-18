@@ -113,6 +113,19 @@ final class TerminalPanel: Panel, ObservableObject {
         "terminal.fill"
     }
 
+    /// A fresh terminal is one that has not been given startup work and has not
+    /// received interactive input. This lets browser-open replace the intended
+    /// placeholder surface without relying on creation time or tab titles.
+    var isFreshForBrowserReplacement: Bool {
+        let hasStartupCommand = surface.initialCommand?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
+        let hasInitialInput = surface.initialInput?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
+        return !hasStartupCommand && !hasInitialInput && !surface.hasReceivedUserInput
+    }
+
     var isDirty: Bool {
         // Bonsplit's "dirty" indicator is a very small dot in the tab strip.
         //
@@ -666,8 +679,13 @@ final class TerminalPanel: Panel, ObservableObject {
 
     @discardableResult
     func sendText(_ text: String) -> Bool {
+        sendText(text, countsAsUserInput: true)
+    }
+
+    @discardableResult
+    func sendText(_ text: String, countsAsUserInput: Bool) -> Bool {
         resumeForExplicitInputIfNeeded()
-        return surface.sendText(text)
+        return surface.sendText(text, countsAsUserInput: countsAsUserInput)
     }
 
     func sendInput(_ text: String) {

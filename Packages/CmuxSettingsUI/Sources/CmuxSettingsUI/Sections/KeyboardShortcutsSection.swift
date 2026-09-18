@@ -385,6 +385,18 @@ public struct KeyboardShortcutsSection: View {
     private func detectConflict(for action: ShortcutAction, stroke: StoredShortcut) -> ShortcutAction? {
         let proposedClause = effectiveWhenClause(for: action)
         for other in ShortcutAction.allCases where other != action {
+            // Horizontal surface navigation intentionally shares the pane-focus
+            // arrows. The app router picks a surface in multi-surface panes and
+            // a pane otherwise, so Settings must allow the same pair.
+            let actionIsHorizontalSurfaceNavigation = action == .nextSurface || action == .prevSurface
+            let otherIsHorizontalSurfaceNavigation = other == .nextSurface || other == .prevSurface
+            let actionIsHorizontalPaneFocus = action == .focusLeft || action == .focusRight
+            let otherIsHorizontalPaneFocus = other == .focusLeft || other == .focusRight
+            if (actionIsHorizontalSurfaceNavigation && otherIsHorizontalPaneFocus) ||
+               (otherIsHorizontalSurfaceNavigation && actionIsHorizontalPaneFocus) {
+                continue
+            }
+
             // Two bindings on the same keystroke only collide when some focus
             // state activates both effective `when` clauses AND router priority
             // cannot decide the overlap. Context-disjoint clauses (e.g.

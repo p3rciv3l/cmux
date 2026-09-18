@@ -254,12 +254,13 @@ extension Workspace {
             progress: progressSnapshot,
             gitBranch: gitBranchSnapshot,
             remote: remoteConfiguration?.sessionSnapshot(),
-            tiling: bonsplitController.tilingConfiguration
+            tiling: bonsplitController.tilingConfiguration,
+            tilingDefaultsVersion: 1
         )
     }
 
     @discardableResult
-    func restoreSessionSnapshot(_ snapshot: SessionWorkspaceSnapshot) -> [UUID: UUID] {
+    func restoreSessionSnapshot(_ snapshot: SessionWorkspaceSnapshot, forDuplication: Bool = false) -> [UUID: UUID] {
         // Restore the saved split scaffold before applying its automatic layout policy.
         _ = bonsplitController.performTilingAction(.manual)
         let previousSuppressClosedPanelHistory = suppressClosedPanelHistory
@@ -278,7 +279,8 @@ extension Workspace {
         restoredGuardedWorkingDirectoriesByPanelId.removeAll(keepingCapacity: false)
 
         let restoredRemoteConfiguration = snapshot.remote?.workspaceConfiguration(
-            localSocketPath: TerminalController.shared.currentSocketPathForRemoteRestore()
+            localSocketPath: TerminalController.shared.currentSocketPathForRemoteRestore(),
+            allowPersistentPTYRestore: !forDuplication
         )
         if let restoredRemoteConfiguration {
             let shouldAutoConnect = Self.shouldAutoConnectRestoredRemote(
@@ -313,7 +315,8 @@ extension Workspace {
                 snapshot: entry.snapshot,
                 panelSnapshotsById: panelSnapshotsById,
                 snapshotWorkspaceId: snapshot.workspaceId,
-                oldToNewPanelIds: &oldToNewPanelIds
+                oldToNewPanelIds: &oldToNewPanelIds,
+                resumeAgents: forDuplication
             )
         }
 
@@ -359,8 +362,14 @@ extension Workspace {
         } else {
             scheduleFocusReconcile()
         }
-        if let tiling = snapshot.tiling {
-            _ = bonsplitController.restoreTilingConfiguration(tiling)
+        var tiling = snapshot.tiling ?? PaneTilingConfiguration(layout: .tile)
+        if snapshot.tilingDefaultsVersion == nil, tiling.layout == .manual {
+            tiling = PaneTilingConfiguration(
+                layout: .tile, masterCount: tiling.masterCount, masterRatio: tiling.masterRatio
+            )
+        }
+        if !bonsplitController.restoreTilingConfiguration(tiling) {
+            _ = bonsplitController.restoreTilingConfiguration(PaneTilingConfiguration(layout: .tile))
         }
         let isWorkspaceManuallyUnread = snapshot.isManuallyUnread == true
         restoreWorkspaceManualUnread(isWorkspaceManuallyUnread)
@@ -1552,7 +1561,8 @@ extension Workspace {
         snapshot: SessionPaneLayoutSnapshot,
         panelSnapshotsById: [UUID: SessionPanelSnapshot],
         snapshotWorkspaceId: UUID?,
-        oldToNewPanelIds: inout [UUID: UUID]
+        oldToNewPanelIds: inout [UUID: UUID],
+        resumeAgents: Bool = false
     ) {
         let existingPanelIds = bonsplitController
             .tabs(inPane: paneId)
@@ -1565,7 +1575,8 @@ extension Workspace {
             guard let createdPanelId = createPanel(
                 from: panelSnapshot,
                 inPane: paneId,
-                snapshotWorkspaceId: snapshotWorkspaceId
+                snapshotWorkspaceId: snapshotWorkspaceId,
+                resumeAgents: resumeAgents
             ) else { continue }
             createdPanelIds.append(createdPanelId)
             oldToNewPanelIds[oldPanelId] = createdPanelId
@@ -1640,7 +1651,8 @@ extension Workspace {
     private func createPanel(
         from snapshot: SessionPanelSnapshot,
         inPane paneId: PaneID,
-        snapshotWorkspaceId: UUID?
+        snapshotWorkspaceId: UUID?,
+        resumeAgents: Bool = false
     ) -> UUID? {
         switch snapshot.type {
         case .terminal:
@@ -1651,7 +1663,7 @@ extension Workspace {
             // Only auto-resume if the agent was actively running when the snapshot was saved.
             // wasAgentRunning == nil means a legacy snapshot; treat as true for backwards compatibility.
             let agentWasRunningAtQuit = snapshot.terminal?.wasAgentRunning ?? true
-            let shouldAutoResumeAgent = autoResumeAgentSessions && agentWasRunningAtQuit
+            let shouldAutoResumeAgent = resumeAgents || (autoResumeAgentSessions && agentWasRunningAtQuit)
             let resumeBindingForStartup =
                 restoredHibernation != nil ||
                 (resumeBinding?.isProcessDetected == true && resumeBinding?.autoResume != true)
@@ -10717,6 +10729,14 @@ final class Workspace: Identifiable, ObservableObject {
         return panel
     }
 
+    /// Whether the focused pane has more than one surface to navigate between.
+    /// This is used by the horizontal Cmd+Option+Arrow shortcuts, which fall
+    /// back to pane focus when there is only one surface in the pane.
+    var hasMultipleSurfacesInFocusedPane: Bool {
+        guard let focusedPaneId = bonsplitController.focusedPaneId else { return false }
+        return bonsplitController.tabs(inPane: focusedPaneId).count > 1
+    }
+
     func representativePanelIdForWorkspaceManualUnread() -> UUID? {
         if let focusedPanelId, panels[focusedPanelId] != nil {
             return focusedPanelId
@@ -11422,6 +11442,9 @@ final class Workspace: Identifiable, ObservableObject {
             }
             bonsplitController.selectTab(initialTabId)
         }
+        // All cmux workspaces start tiled; an explicit manual choice is persisted
+        // separately so session restoration never silently enables it again.
+        _ = bonsplitController.performTilingAction(.tile)
         tmuxLayoutSnapshot = bonsplitController.layoutSnapshot()
         scheduleExtensionSidebarProjectRootRefresh(for: currentDirectory)
 
@@ -15305,6 +15328,95 @@ final class Workspace: Identifiable, ObservableObject {
         installBrowserPanelSubscription(browserPanel)
         browserPanel.setRemoteWorkspaceStatus(browserRemoteWorkspaceStatusSnapshot())
 
+        return browserPanel
+    }
+
+    /// Replace the focused fresh terminal with a browser while preserving its
+    /// pane, tab, and surface identity. Returns nil when the focused surface is
+    /// not an eligible fresh terminal, allowing callers to open a normal browser
+    /// surface instead.
+    @discardableResult
+    func replaceFreshTerminalSurfaceWithBrowser(
+        url: URL? = nil,
+        preferredProfileID: UUID? = nil
+    ) -> BrowserPanel? {
+        guard BrowserAvailabilitySettings.isEnabled(),
+              let panelId = focusedPanelId,
+              let terminalPanel = terminalPanel(for: panelId),
+              terminalPanel.isFreshForBrowserReplacement,
+              let tabId = surfaceIdFromPanelId(panelId),
+              let paneId = paneId(forPanelId: panelId),
+              bonsplitController.focusedPaneId == paneId,
+              bonsplitController.selectedTab(inPane: paneId)?.id == tabId else {
+            return nil
+        }
+
+        let wasPinned = pinnedPanelIds.contains(panelId)
+        _ = discardClosedPanelLifecycleState(
+            panelId: panelId,
+            tabId: tabId,
+            paneId: paneId,
+            panel: terminalPanel,
+            origin: "terminal_replaced_by_browser",
+            closePanel: true,
+            publishSurfaceClosedEvent: true,
+            clearSurfaceNotifications: true,
+            requestTransferredRemoteCleanup: true,
+            cleanupControllerSurfaceState: true
+        )
+
+        let browserPanel = BrowserPanel(
+            id: panelId,
+            workspaceId: id,
+            profileID: resolvedNewBrowserProfileID(preferredProfileID: preferredProfileID),
+            initialURL: url,
+            renderInitialNavigation: true,
+            preloadInitialNavigationInBackground: false,
+            omnibarVisible: true,
+            transparentBackground: false,
+            proxyEndpoint: remoteProxyEndpoint,
+            bypassRemoteProxy: false,
+            isRemoteWorkspace: isRemoteWorkspace,
+            remoteWebsiteDataStoreIdentifier: isRemoteWorkspace ? id : nil
+        )
+        configureBrowserPanel(browserPanel)
+        panels[panelId] = browserPanel
+        panelTitles[panelId] = browserPanel.displayTitle
+        if wasPinned {
+            pinnedPanelIds.insert(panelId)
+        }
+        surfaceIdToPanelId[tabId] = panelId
+        setPreferredBrowserProfileID(browserPanel.profileID)
+
+        bonsplitController.updateTab(
+            tabId,
+            title: browserPanel.displayTitle,
+            icon: .some(browserPanel.displayIcon),
+            iconImageData: .some(nil),
+            kind: .some(SurfaceKind.browser),
+            hasCustomTitle: false,
+            isDirty: browserPanel.isDirty,
+            showsNotificationBadge: false,
+            isLoading: browserPanel.isLoading,
+            isAudioMuted: browserPanel.isMuted,
+            isPinned: wasPinned
+        )
+        publishCmuxSurfaceCreated(
+            panelId,
+            paneId: paneId,
+            kind: SurfaceKind.browser,
+            origin: "terminal_replaced_by_browser",
+            focused: true
+        )
+
+        bonsplitController.focusPane(paneId)
+        bonsplitController.selectTab(tabId)
+        browserPanel.focus()
+        applyTabSelection(tabId: tabId, inPane: paneId)
+        installBrowserPanelSubscription(browserPanel)
+        browserPanel.setRemoteWorkspaceStatus(browserRemoteWorkspaceStatusSnapshot())
+        scheduleTerminalGeometryReconcile()
+        scheduleFocusReconcile()
         return browserPanel
     }
 

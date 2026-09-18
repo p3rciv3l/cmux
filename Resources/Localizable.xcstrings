@@ -2,6 +2,74 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+  "command.duplicateWorkspace.title": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Duplicate Workspace"
+        }
+      },
+      "ja": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "ワークスペースを複製"
+        }
+      }
+    }
+  },
+  "contextMenu.duplicateWorkspaces": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Duplicate Workspaces"
+        }
+      },
+      "ja": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "ワークスペースを複製"
+        }
+      }
+    }
+  },
+  "contextMenu.duplicateWorkspace": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Duplicate Workspace"
+        }
+      },
+      "ja": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "ワークスペースを複製"
+        }
+      }
+    }
+  },
+  "shortcut.duplicateWorkspace.label": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Duplicate Workspace"
+        }
+      },
+      "ja": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "ワークスペースを複製"
+        }
+      }
+    }
+  },
     "shortcut.tilingTile.label": {
       "extractionState": "manual",
       "localizations": {

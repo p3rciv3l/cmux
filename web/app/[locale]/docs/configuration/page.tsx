@@ -428,6 +428,7 @@ working-directory = ~/code`}</CodeBlock>
         <Link href="/docs/keyboard-shortcuts">keyboard shortcuts page</Link>.
       </p>
       <p>{t("tilingShortcuts")}</p>
+      <p>{t("duplicateWorkspaceShortcut")}</p>
       {shortcutCategories.map((category) => (
         <section key={category.id}>
           <h4>{shortcutTranslations(`cat.${category.titleKey}` as never)}</h4>

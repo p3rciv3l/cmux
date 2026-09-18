@@ -164,9 +164,9 @@ For more info on how to configure cmux, [head over to our docs](https://cmux.com
 
 | Shortcut | Action |
 |----------|--------|
-| ⌘ T | New surface |
-| ⌘ ⇧ ] | Next surface |
-| ⌘ ⇧ [ | Previous surface |
+| ⌘ T | New surface (browser when a browser is focused) |
+| ⌥ ⌘ → | Next surface when the focused pane has multiple surfaces |
+| ⌥ ⌘ ← | Previous surface when the focused pane has multiple surfaces |
 | ⌃ Tab | Next surface |
 | ⌃ ⇧ Tab | Previous surface |
 | ⌃ 1–8 | Jump to surface 1–8 |
@@ -179,7 +179,7 @@ For more info on how to configure cmux, [head over to our docs](https://cmux.com
 |----------|--------|
 | ⌘ D | Split right |
 | ⌘ ⇧ D | Split down |
-| ⌥ ⌘ ← → ↑ ↓ | Focus pane directionally |
+| ⌥ ⌘ ← → ↑ ↓ | Focus pane directionally (horizontal arrows when the pane has one surface) |
 | ⌘ ⇧ H | Flash focused panel |
 
 ### Browser

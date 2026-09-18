@@ -4418,6 +4418,7 @@ final class BrowserPanel: Panel, ObservableObject {
     }
 
     init(
+        id: UUID = UUID(),
         workspaceId: UUID,
         profileID: UUID? = nil,
         initialURL: URL? = nil,
@@ -4435,7 +4436,7 @@ final class BrowserPanel: Panel, ObservableObject {
         // Register fallback defaults and normalize legacy/out-of-range settings once
         // per process, before any setting is read below or by the SwiftUI view.
         Self.bootstrapBrowserDefaultsIfNeeded()
-        self.id = UUID()
+        self.id = id
         self.workspaceId = workspaceId
         let requestedProfileID = profileID ?? BrowserProfileStore.shared.effectiveLastUsedProfileID
         let resolvedProfileID = BrowserProfileStore.shared.profileDefinition(id: requestedProfileID) != nil

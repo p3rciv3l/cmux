@@ -1813,8 +1813,44 @@ struct SessionWorkspaceSnapshot: Codable, Sendable {
     var progress: SessionProgressSnapshot?
     var gitBranch: SessionGitBranchSnapshot?
     var remote: SessionRemoteWorkspaceSnapshot?
-    /// Optional so sessions written before pane tiling keep their manual layout.
+    /// Explicit layout policy saved with the workspace.
     var tiling: PaneTilingConfiguration? = nil
+    /// Missing in older sessions; migrate their implicit manual policy to tiling once.
+    var tilingDefaultsVersion: Int? = nil
+
+    /// Preserve the arrangement and Codex conversation identity, but never attach
+    /// another workspace to the source's running terminal or replay its commands.
+    func forWorkspaceDuplication() -> Self {
+        var copy = self
+        copy.workspaceId = nil
+        copy.isManuallyUnread = false
+        copy.hasUnreadIndicator = false
+        copy.notifications = nil
+        copy.statusEntries = []
+        copy.logEntries = []
+        copy.progress = nil
+        copy.remote?.persistentDaemonSlot = nil
+        copy.remote?.relayPort = nil
+        copy.panels = panels.map { panel in
+            var panel = panel
+            panel.isManuallyUnread = false
+            panel.hasUnreadIndicator = false
+            panel.restoredUnreadContributesToWorkspace = false
+            panel.notifications = nil
+            panel.listeningPorts = []
+            panel.ttyName = nil
+            if let terminal = panel.terminal {
+                panel.terminal = SessionTerminalPanelSnapshot(
+                    workingDirectory: terminal.workingDirectory,
+                    agent: terminal.agent?.kind == .codex ? terminal.agent : nil,
+                    isRemoteTerminal: terminal.isRemoteTerminal,
+                    wasAgentRunning: true
+                )
+            }
+            return panel
+        }
+        return copy
+    }
 }
 
 struct SessionWorkspaceGroupSnapshot: Codable, Sendable, Equatable {

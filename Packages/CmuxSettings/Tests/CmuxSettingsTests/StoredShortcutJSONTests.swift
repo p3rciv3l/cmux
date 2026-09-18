@@ -4,6 +4,28 @@ import Testing
 
 @Suite("Stored shortcut JSON compatibility")
 struct StoredShortcutJSONTests {
+    @Test
+    func duplicateWorkspaceBindingCanBeConfiguredAndUnbound() throws {
+        let action = try #require(ShortcutAction(rawValue: "duplicateWorkspace"))
+        #expect(action.defaultShortcut == StoredShortcut(first: ShortcutStroke(key: "d", control: true)))
+        #expect(StoredShortcut.decodeFromJSON(try rawJSON(#""cmd+alt+n""#)) ==
+                StoredShortcut(first: ShortcutStroke(key: "n", command: true, option: true)))
+        #expect(StoredShortcut.decodeFromJSON(try rawJSON("null")) == .unbound)
+    }
+
+    @Test
+    func tilingDefaultsAreBoundAndDoNotOverlapAnyOtherShortcut() throws {
+        let actions = ShortcutAction.allCases.filter { $0.rawValue.hasPrefix("tiling") }
+        #expect(actions.count == 13)
+        for action in actions {
+            let shortcut = try #require(action.defaultShortcut)
+            #expect(shortcut != .unbound)
+            for other in ShortcutAction.allCases where other != action {
+                #expect(shortcut != other.defaultShortcut, "\(action.rawValue) overlaps \(other.rawValue)")
+            }
+        }
+    }
+
     @Test(arguments: [
         (#""cmd+ctrl+t""#, StoredShortcut(first: ShortcutStroke(key: "t", command: true, control: true))),
         (#"["ctrl+b", "return"]"#, StoredShortcut(first: ShortcutStroke(key: "b", control: true), second: ShortcutStroke(key: "\r"))),

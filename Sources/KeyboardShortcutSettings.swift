@@ -103,6 +103,7 @@ enum KeyboardShortcutSettings {
         case selectWorkspaceByNumber
         case renameTab
         case renameWorkspace
+        case duplicateWorkspace
         case editWorkspaceDescription
         case closeTab
         case closeOtherTabsInPane
@@ -224,6 +225,7 @@ enum KeyboardShortcutSettings {
             case .closeTab: return String(localized: "menu.file.closeTab", defaultValue: "Close Tab")
             case .closeOtherTabsInPane: return String(localized: "menu.file.closeOtherTabs", defaultValue: "Close Other Tabs in Pane")
             case .closeWorkspace: return String(localized: "shortcut.closeWorkspace.label", defaultValue: "Close Workspace")
+            case .duplicateWorkspace: return String(localized: "shortcut.duplicateWorkspace.label", defaultValue: "Duplicate Workspace")
             case .groupSelectedWorkspaces: return String(localized: "shortcut.groupSelectedWorkspaces.label", defaultValue: "Group Selected Workspaces")
             case .toggleFocusedWorkspaceGroupCollapsed: return String(localized: "shortcut.toggleFocusedWorkspaceGroupCollapsed.label", defaultValue: "Toggle Focused Workspace's Group Collapse")
             case .reopenClosedBrowserPanel: return String(localized: "menu.history.reopenLastClosed", defaultValue: "Reopen Last Closed")
@@ -388,6 +390,8 @@ enum KeyboardShortcutSettings {
                 return StoredShortcut(key: "t", command: true, shift: false, option: true, control: false)
             case .closeWorkspace:
                 return StoredShortcut(key: "w", command: true, shift: true, option: false, control: false)
+            case .duplicateWorkspace:
+                return StoredShortcut(key: "d", command: false, shift: false, option: false, control: true)
             case .groupSelectedWorkspaces:
                 // Cmd+Shift+G is the user-natural mnemonic. It collides with
                 // toggleReactGrab's default, but handleGroupSelectedWorkspacesShortcut
@@ -425,19 +429,40 @@ enum KeyboardShortcutSettings {
             case .splitDown: return StoredShortcut(key: "d", command: true, shift: true, option: false, control: false)
             case .toggleSplitZoom: return StoredShortcut(key: "\r", command: true, shift: true, option: false, control: false)
             case .equalizeSplits: return StoredShortcut(key: "=", command: true, shift: false, option: false, control: true)
-            case .tilingTile, .tilingMonocle, .tilingToggleLayout,
-                 .tilingFocusNext, .tilingFocusPrevious, .tilingMoveNext, .tilingMovePrevious,
-                 .tilingPromote, .tilingIncreaseMasterCount, .tilingDecreaseMasterCount,
-                 .tilingIncreaseMasterRatio, .tilingDecreaseMasterRatio, .tilingManual:
-                return .unbound
+            case .tilingTile:
+                return StoredShortcut(key: "t", command: true, shift: false, option: false, control: true)
+            case .tilingMonocle:
+                return StoredShortcut(key: "m", command: true, shift: false, option: false, control: true)
+            case .tilingToggleLayout:
+                return StoredShortcut(key: "l", command: true, shift: false, option: false, control: true)
+            case .tilingFocusNext:
+                return StoredShortcut(key: "→", command: true, shift: false, option: false, control: true)
+            case .tilingFocusPrevious:
+                return StoredShortcut(key: "←", command: true, shift: false, option: false, control: true)
+            case .tilingMoveNext:
+                return StoredShortcut(key: "→", command: true, shift: true, option: false, control: true)
+            case .tilingMovePrevious:
+                return StoredShortcut(key: "←", command: true, shift: true, option: false, control: true)
+            case .tilingPromote:
+                return StoredShortcut(key: "\r", command: true, shift: false, option: false, control: true)
+            case .tilingIncreaseMasterCount:
+                return StoredShortcut(key: "↑", command: true, shift: false, option: false, control: true)
+            case .tilingDecreaseMasterCount:
+                return StoredShortcut(key: "↓", command: true, shift: false, option: false, control: true)
+            case .tilingIncreaseMasterRatio:
+                return StoredShortcut(key: "→", command: true, shift: false, option: true, control: true)
+            case .tilingDecreaseMasterRatio:
+                return StoredShortcut(key: "←", command: true, shift: false, option: true, control: true)
+            case .tilingManual:
+                return StoredShortcut(key: "0", command: true, shift: false, option: false, control: true)
             case .splitBrowserRight:
                 return StoredShortcut(key: "d", command: true, shift: false, option: true, control: false)
             case .splitBrowserDown:
                 return StoredShortcut(key: "d", command: true, shift: true, option: true, control: false)
             case .nextSurface:
-                return StoredShortcut(key: "]", command: true, shift: true, option: false, control: false)
+                return StoredShortcut(key: "→", command: true, shift: false, option: true, control: false)
             case .prevSurface:
-                return StoredShortcut(key: "[", command: true, shift: true, option: false, control: false)
+                return StoredShortcut(key: "←", command: true, shift: false, option: true, control: false)
             case .selectSurfaceByNumber:
                 return StoredShortcut(key: "1", command: false, shift: false, option: false, control: true)
             case .newSurface:
@@ -590,6 +615,18 @@ enum KeyboardShortcutSettings {
             proposedAction: Action,
             configuredShortcut: StoredShortcut
         ) -> Bool {
+            // Horizontal surface navigation intentionally shares the pane-focus
+            // arrows. The dispatcher selects a surface when the focused pane
+            // has multiple surfaces and otherwise lets pane focus handle it.
+            let isHorizontalSurfaceNavigation = self == .nextSurface || self == .prevSurface
+            let isHorizontalPaneFocus = proposedAction == .focusLeft || proposedAction == .focusRight
+            let proposedIsHorizontalSurfaceNavigation = proposedAction == .nextSurface || proposedAction == .prevSurface
+            let configuredIsHorizontalPaneFocus = self == .focusLeft || self == .focusRight
+            if (isHorizontalSurfaceNavigation && isHorizontalPaneFocus) ||
+               (proposedIsHorizontalSurfaceNavigation && configuredIsHorizontalPaneFocus) {
+                return false
+            }
+
             // Two bindings on the same keystroke only collide when some focus
             // state activates both AND router priority cannot decide the overlap.
             // A `shortcuts.when` override (or the built-in context default) can

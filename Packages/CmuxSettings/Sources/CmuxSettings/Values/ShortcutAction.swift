@@ -54,6 +54,8 @@ public enum ShortcutAction: String, CaseIterable, Sendable, Hashable, SettingCod
     case selectWorkspaceByNumber
     case renameTab
     case renameWorkspace
+    /// Duplicate the selected workspaces, including their resumable Codex conversations.
+    case duplicateWorkspace
     case editWorkspaceDescription
     case closeTab
     case closeOtherTabsInPane
@@ -180,7 +182,7 @@ extension ShortcutAction {
             return .workspace
         case .nextSurface, .prevSurface, .selectSurfaceByNumber, .nextSidebarTab,
              .prevSidebarTab, .focusHistoryBack, .focusHistoryForward,
-             .selectWorkspaceByNumber, .renameTab, .renameWorkspace,
+             .selectWorkspaceByNumber, .renameTab, .renameWorkspace, .duplicateWorkspace,
              .editWorkspaceDescription, .closeTab, .closeOtherTabsInPane, .closeWorkspace,
              .groupSelectedWorkspaces, .toggleFocusedWorkspaceGroupCollapsed,
              .reopenClosedBrowserPanel, .newSurface, .toggleTerminalCopyMode,
@@ -340,6 +342,8 @@ extension ShortcutAction {
         case .closeTab: return "Close Tab"
         case .closeOtherTabsInPane: return "Close Other Tabs in Pane"
         case .closeWorkspace: return "Close Workspace"
+        case .duplicateWorkspace:
+            return String(localized: "shortcut.duplicateWorkspace.label", defaultValue: "Duplicate Workspace")
         case .groupSelectedWorkspaces:
             return String(localized: "shortcut.groupSelectedWorkspaces.label", defaultValue: "Group Selected Workspaces")
         case .toggleFocusedWorkspaceGroupCollapsed:

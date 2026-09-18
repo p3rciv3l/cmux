@@ -264,6 +264,22 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
 
 
 final class WorkspaceRenameShortcutDefaultsTests: XCTestCase {
+    func testHorizontalSurfaceNavigationDefaultsToCommandOptionArrows() {
+        let next = KeyboardShortcutSettings.Action.nextSurface.defaultShortcut
+        XCTAssertEqual(next.key, "→")
+        XCTAssertTrue(next.command)
+        XCTAssertTrue(next.option)
+        XCTAssertFalse(next.shift)
+        XCTAssertFalse(next.control)
+
+        let previous = KeyboardShortcutSettings.Action.prevSurface.defaultShortcut
+        XCTAssertEqual(previous.key, "←")
+        XCTAssertTrue(previous.command)
+        XCTAssertTrue(previous.option)
+        XCTAssertFalse(previous.shift)
+        XCTAssertFalse(previous.control)
+    }
+
     func testRenameTabShortcutDefaultsAndMetadata() {
         XCTAssertEqual(KeyboardShortcutSettings.Action.renameTab.label, "Rename Tab")
         XCTAssertEqual(KeyboardShortcutSettings.Action.renameTab.defaultsKey, "shortcut.renameTab")
@@ -4794,6 +4810,45 @@ final class WorkspaceSidebarExtensionBrowserSurfaceTests: XCTestCase {
         XCTAssertEqual(workspace.focusedPanelId, extensionBrowserPanel.id)
         XCTAssertEqual(workspace.paneId(forPanelId: extensionBrowserPanel.id), leftPaneId)
         XCTAssertNotEqual(workspace.paneId(forPanelId: extensionBrowserPanel.id), workspace.paneId(forPanelId: rightPanel.id))
+    }
+}
+
+
+@MainActor
+final class WorkspaceBrowserSurfaceReplacementTests: XCTestCase {
+    func testFreshTerminalIsReplacedInPlaceByBrowser() {
+        let workspace = Workspace()
+        guard let terminal = workspace.focusedTerminalPanel,
+              let tabId = workspace.surfaceIdFromPanelId(terminal.id) else {
+            XCTFail("Expected focused terminal and surface tab")
+            return
+        }
+
+        XCTAssertTrue(terminal.isFreshForBrowserReplacement)
+        guard let browser = workspace.replaceFreshTerminalSurfaceWithBrowser() else {
+            XCTFail("Expected fresh terminal replacement to create a browser")
+            return
+        }
+
+        XCTAssertTrue(browser.id == terminal.id)
+        XCTAssertTrue((workspace.panels[terminal.id] as? BrowserPanel) === browser)
+        XCTAssertEqual(workspace.surfaceIdFromPanelId(terminal.id), tabId)
+        XCTAssertEqual(workspace.focusedPanelId, terminal.id)
+        XCTAssertEqual(workspace.bonsplitController.tab(tabId)?.kind, Workspace.SurfaceKind.browser)
+    }
+
+    func testTerminalWithInputIsNotEligibleForBrowserReplacement() {
+        let workspace = Workspace()
+        guard let terminal = workspace.focusedTerminalPanel else {
+            XCTFail("Expected focused terminal")
+            return
+        }
+
+        terminal.surface.noteUserInput()
+
+        XCTAssertFalse(terminal.isFreshForBrowserReplacement)
+        XCTAssertNil(workspace.replaceFreshTerminalSurfaceWithBrowser())
+        XCTAssertTrue((workspace.panels[terminal.id] as? TerminalPanel) === terminal)
     }
 }
 

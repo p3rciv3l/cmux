@@ -60,7 +60,7 @@ def main() -> None:
             client.select_workspace(workspace_id)
             target = {"window_id": window_id, "workspace_id": workspace_id}
             initial = client._call("workspace.tiling.state", target)
-            assert initial["layout"] == "manual", initial
+            assert initial["layout"] == "tile", initial
             invalid_targets = [
                 {key: "not-a-valid-id"}
                 for key in ("window_id", "workspace_id", "surface_id", "terminal_id", "tab_id", "pane_id")
@@ -78,7 +78,7 @@ def main() -> None:
                 else:
                     raise AssertionError(f"Invalid target accepted: {invalid}: {result}")
                 current = client._call("workspace.tiling.state", target)
-                assert current["layout"] == "manual", (invalid, current)
+                assert current["layout"] == "tile", (invalid, current)
                 assert current["pane_ids"] == initial["pane_ids"], (invalid, current)
 
             # Explicit workspace targets take priority over stale ambient pane

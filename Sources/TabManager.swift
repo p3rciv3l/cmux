@@ -2731,13 +2731,64 @@ class TabManager: ObservableObject {
         }
     }
 
+    private var isDuplicatingWorkspaces = false
+
+    /// All duplication entry points use the same selection and restoration path.
+    @discardableResult
+    func duplicateWorkspaces(_ workspaceIds: [UUID]? = nil) async -> [Workspace] {
+        guard !isDuplicatingWorkspaces else { return [] }
+        isDuplicatingWorkspaces = true
+        defer { isDuplicatingWorkspaces = false }
+        let selection = orderedSidebarSelectedWorkspaceIds()
+        let targetIds = Set(workspaceIds ?? (selection.count > 1 ? selection : selectedTabId.map { [$0] } ?? []))
+        guard !targetIds.isEmpty else { return [] }
+        let activeSourceId = selectedTabId
+        let agentIndex = await RestorableAgentSessionIndex.loadIncludingProcessDetectedSnapshots()
+        guard !Task.isCancelled else { return [] }
+        // Resolve again after discovery: a source may have closed while it ran.
+        let sources = tabs.filter { targetIds.contains($0.id) }
+        guard !sources.isEmpty else { return [] }
+        let snapshots = sources.map {
+            $0.sessionSnapshot(includeScrollback: false, restorableAgentIndex: agentIndex)
+                .forWorkspaceDuplication()
+        }
+        var duplicates: [Workspace] = []
+        for (source, snapshot) in zip(sources, snapshots) {
+            let duplicate = addWorkspace(
+                title: source.title,
+                workingDirectory: snapshot.currentDirectory,
+                inheritWorkingDirectory: false,
+                select: false,
+                autoWelcomeIfNeeded: false,
+                autoRefreshMetadata: false,
+                normalizeWorkspaceGroupsAfterInsert: false
+            )
+            duplicate.restoreSessionSnapshot(snapshot, forDuplication: true)
+            // Keep the visible name even if it was originally inferred from a process.
+            duplicate.setCustomTitle(source.title)
+            var ordered = tabs.filter { $0.id != duplicate.id }
+            if let index = ordered.firstIndex(where: { $0.id == source.id }) {
+                ordered.insert(duplicate, at: index + 1)
+            } else {
+                ordered.append(duplicate)
+            }
+            tabs = ordered
+            requestBackgroundWorkspaceLoad(for: duplicate.id)
+            duplicates.append(duplicate)
+        }
+        let focusIndex = sources.firstIndex(where: { $0.id == activeSourceId }) ?? 0
+        selectWorkspace(duplicates[focusIndex])
+        clearSidebarMultiSelection(except: duplicates[focusIndex].id)
+        return duplicates
+    }
+
     @MainActor
     private func sendWelcomeWhenReady(to workspace: Workspace) {
         if let terminalPanel = workspace.focusedTerminalPanel,
            terminalPanel.surface.surface != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 UserDefaults.standard.set(true, forKey: WelcomeSettings.shownKey)
-                terminalPanel.sendText("cmux welcome\n")
+                terminalPanel.sendText("cmux welcome\n", countsAsUserInput: false)
             }
             return
         }
@@ -2757,7 +2808,7 @@ class TabManager: ObservableObject {
             panelsCancellable?.cancel()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 UserDefaults.standard.set(true, forKey: WelcomeSettings.shownKey)
-                terminalPanel.sendText("cmux welcome\n")
+                terminalPanel.sendText("cmux welcome\n", countsAsUserInput: false)
             }
         }
 

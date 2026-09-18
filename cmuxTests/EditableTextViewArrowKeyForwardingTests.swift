@@ -86,9 +86,9 @@ struct EditableTextViewArrowKeyForwardingTests {
     }
 
     @Test(arguments: [123, 124, 125, 126] as [UInt16])
-    func doesNotStealCommandOptionArrowFromPaneFocusShortcut(keyCode: UInt16) {
-        // Cmd+Option+Arrow is reserved for cmux pane-focus shortcuts and must
-        // not be claimed by the text view.
+    func doesNotStealCommandOptionArrowFromSurfaceOrPaneFocusShortcut(keyCode: UInt16) {
+        // Cmd+Option+Arrow is reserved for cmux surface/pane-focus shortcuts
+        // and must not be claimed by the text view.
         #expect(
             !shouldDispatchEditableTextViewArrowViaFirstResponderKeyDown(
                 keyCode: keyCode,

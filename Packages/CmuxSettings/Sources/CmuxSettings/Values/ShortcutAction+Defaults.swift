@@ -62,6 +62,7 @@ extension ShortcutAction {
         case .closeTab: return ShortcutStroke(key: "w", command: true)
         case .closeOtherTabsInPane: return ShortcutStroke(key: "t", command: true, option: true)
         case .closeWorkspace: return ShortcutStroke(key: "w", command: true, shift: true)
+        case .duplicateWorkspace: return ShortcutStroke(key: "d", control: true)
         case .groupSelectedWorkspaces: return ShortcutStroke(key: "g", command: true, shift: true)
         case .toggleFocusedWorkspaceGroupCollapsed: return ShortcutStroke(key: ".", command: true, control: true)
         case .reopenClosedBrowserPanel: return ShortcutStroke(key: "t", command: true, shift: true)
@@ -73,15 +74,23 @@ extension ShortcutAction {
         case .splitDown: return ShortcutStroke(key: "d", command: true, shift: true)
         case .toggleSplitZoom: return ShortcutStroke(key: "\r", command: true, shift: true)
         case .equalizeSplits: return ShortcutStroke(key: "=", command: true, control: true)
-        case .tilingTile, .tilingMonocle, .tilingToggleLayout,
-             .tilingFocusNext, .tilingFocusPrevious, .tilingMoveNext, .tilingMovePrevious,
-             .tilingPromote, .tilingIncreaseMasterCount, .tilingDecreaseMasterCount,
-             .tilingIncreaseMasterRatio, .tilingDecreaseMasterRatio, .tilingManual:
-            return nil
+        case .tilingTile: return ShortcutStroke(key: "t", command: true, control: true)
+        case .tilingMonocle: return ShortcutStroke(key: "m", command: true, control: true)
+        case .tilingToggleLayout: return ShortcutStroke(key: "l", command: true, control: true)
+        case .tilingFocusNext: return ShortcutStroke(key: "→", command: true, control: true)
+        case .tilingFocusPrevious: return ShortcutStroke(key: "←", command: true, control: true)
+        case .tilingMoveNext: return ShortcutStroke(key: "→", command: true, shift: true, control: true)
+        case .tilingMovePrevious: return ShortcutStroke(key: "←", command: true, shift: true, control: true)
+        case .tilingPromote: return ShortcutStroke(key: "\r", command: true, control: true)
+        case .tilingIncreaseMasterCount: return ShortcutStroke(key: "↑", command: true, control: true)
+        case .tilingDecreaseMasterCount: return ShortcutStroke(key: "↓", command: true, control: true)
+        case .tilingIncreaseMasterRatio: return ShortcutStroke(key: "→", command: true, option: true, control: true)
+        case .tilingDecreaseMasterRatio: return ShortcutStroke(key: "←", command: true, option: true, control: true)
+        case .tilingManual: return ShortcutStroke(key: "0", command: true, control: true)
         case .splitBrowserRight: return ShortcutStroke(key: "d", command: true, option: true)
         case .splitBrowserDown: return ShortcutStroke(key: "d", command: true, shift: true, option: true)
-        case .nextSurface: return ShortcutStroke(key: "]", command: true, shift: true)
-        case .prevSurface: return ShortcutStroke(key: "[", command: true, shift: true)
+        case .nextSurface: return ShortcutStroke(key: "→", command: true, option: true)
+        case .prevSurface: return ShortcutStroke(key: "←", command: true, option: true)
         case .selectSurfaceByNumber: return ShortcutStroke(key: "1", control: true)
         case .selectWorkspaceByNumber: return ShortcutStroke(key: "1", command: true)
         case .newSurface: return ShortcutStroke(key: "t", command: true)

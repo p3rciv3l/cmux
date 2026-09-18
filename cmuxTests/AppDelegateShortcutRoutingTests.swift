@@ -1764,6 +1764,192 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
         XCTAssertTrue(appDelegate.tabManager === secondManager, "Shortcut routing should retarget active manager to event window")
     }
 
+    func testCmdTOpensBrowserSurfaceWhenBrowserIsFocused() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId),
+              let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let firstBrowser = manager.openBrowser() else {
+            XCTFail("Expected test window, manager, workspace, and browser surface")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        let panelCountBefore = workspace.panels.count
+
+        guard let event = makeKeyDownEvent(
+            key: "t",
+            modifiers: [.command],
+            keyCode: 17,
+            windowNumber: window.windowNumber
+        ) else {
+            XCTFail("Failed to construct Cmd+T event")
+            return
+        }
+
+#if DEBUG
+        XCTAssertTrue(appDelegate.debugHandleCustomShortcut(event: event))
+#else
+        XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        let browserPanels = workspace.panels.values.compactMap { $0 as? BrowserPanel }
+        XCTAssertEqual(workspace.panels.count, panelCountBefore + 1)
+        XCTAssertEqual(browserPanels.count, 2)
+        XCTAssertNotEqual(workspace.focusedPanelId, firstBrowser)
+        XCTAssertTrue(workspace.focusedPanelId.map { workspace.panels[$0] is BrowserPanel } == true)
+    }
+
+    func testCmdShiftLOpensBrowserByReplacingFocusedFreshTerminal() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId),
+              let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let terminal = workspace.focusedTerminalPanel,
+              let tabId = workspace.surfaceIdFromPanelId(terminal.id) else {
+            XCTFail("Expected test window, manager, workspace, and focused terminal")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        let panelCountBefore = workspace.panels.count
+
+        guard let event = makeKeyDownEvent(
+            key: "l",
+            modifiers: [.command, .shift],
+            keyCode: 37,
+            windowNumber: window.windowNumber
+        ) else {
+            XCTFail("Failed to construct Cmd+Shift+L event")
+            return
+        }
+
+#if DEBUG
+        XCTAssertTrue(appDelegate.debugHandleCustomShortcut(event: event))
+#else
+        XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(workspace.panels.count, panelCountBefore)
+        XCTAssertTrue(workspace.panels[terminal.id] is BrowserPanel)
+        XCTAssertEqual(workspace.focusedPanelId, terminal.id)
+        XCTAssertEqual(workspace.surfaceIdFromPanelId(terminal.id), tabId)
+        XCTAssertEqual(workspace.bonsplitController.tab(tabId)?.kind, Workspace.SurfaceKind.browser)
+    }
+
+    func testCmdShiftLReplacesUntouchedTerminalAfterAutomaticWelcome() throws {
+        try assertBrowserOpenAfterAutomaticWelcome(hasUserInput: false)
+    }
+
+    func testCmdShiftLPreservesUsedTerminalAfterAutomaticWelcome() throws {
+        try assertBrowserOpenAfterAutomaticWelcome(hasUserInput: true)
+    }
+
+    private func assertBrowserOpenAfterAutomaticWelcome(hasUserInput: Bool) throws {
+        let appDelegate = try XCTUnwrap(AppDelegate.shared)
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        let window = try XCTUnwrap(window(withId: windowId))
+        let manager = try XCTUnwrap(appDelegate.tabManagerFor(windowId: windowId))
+        let workspace = try XCTUnwrap(manager.selectedWorkspace)
+        let terminal = try XCTUnwrap(workspace.focusedTerminalPanel)
+        let tabId = try XCTUnwrap(workspace.surfaceIdFromPanelId(terminal.id))
+        window.makeKeyAndOrderFront(nil)
+        waitFor(timeout: 5, until: { terminal.surface.surface != nil })
+        XCTAssertNotNil(terminal.surface.surface, "The test must exercise a running terminal")
+
+        if hasUserInput {
+            XCTAssertTrue(terminal.sendText("printf 'cmux-browser-replacement-user-input\\n'\n"))
+        }
+        appDelegate.sendWelcomeCommandWhenReady(to: workspace)
+
+        let event = try XCTUnwrap(makeKeyDownEvent(
+            key: "l",
+            modifiers: [.command, .shift],
+            keyCode: 37,
+            windowNumber: window.windowNumber
+        ))
+        NSApp.sendEvent(event)
+
+        XCTAssertEqual(workspace.surfaceIdFromPanelId(terminal.id), tabId)
+        if hasUserInput {
+            XCTAssertEqual(workspace.panels.count, 2, "Welcome must not reset a terminal's previous user activity")
+            XCTAssertTrue(workspace.panels[terminal.id] is TerminalPanel)
+            XCTAssertNotEqual(workspace.focusedPanelId, terminal.id)
+        } else {
+            XCTAssertEqual(workspace.panels.count, 1, "Automatic welcome must not leave an extra terminal tab")
+            XCTAssertTrue(workspace.panels[terminal.id] is BrowserPanel)
+            XCTAssertEqual(workspace.focusedPanelId, terminal.id)
+        }
+    }
+
+    func testCmdOptionRightNavigatesSurfacesInFocusedPane() {
+        guard let appDelegate = AppDelegate.shared else {
+            XCTFail("Expected AppDelegate.shared")
+            return
+        }
+
+        let windowId = appDelegate.createMainWindow()
+        defer { closeWindow(withId: windowId) }
+
+        guard let window = window(withId: windowId),
+              let manager = appDelegate.tabManagerFor(windowId: windowId),
+              let workspace = manager.selectedWorkspace,
+              let firstTerminal = workspace.focusedTerminalPanel,
+              let paneId = workspace.paneId(forPanelId: firstTerminal.id),
+              let secondTerminal = workspace.newTerminalSurface(inPane: paneId, focus: true),
+              let firstTabId = workspace.surfaceIdFromPanelId(firstTerminal.id),
+              let secondTabId = workspace.surfaceIdFromPanelId(secondTerminal.id) else {
+            XCTFail("Expected two terminal surfaces in one pane")
+            return
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+        XCTAssertEqual(workspace.bonsplitController.selectedTab(inPane: paneId)?.id, secondTabId)
+
+        guard let event = makeKeyDownEvent(
+            key: "→",
+            modifiers: [.command, .option],
+            keyCode: 124,
+            windowNumber: window.windowNumber
+        ) else {
+            XCTFail("Failed to construct Cmd+Option+Right event")
+            return
+        }
+
+#if DEBUG
+        XCTAssertTrue(appDelegate.debugHandleCustomShortcut(event: event))
+#else
+        XCTFail("debugHandleCustomShortcut is only available in DEBUG")
+#endif
+
+        XCTAssertEqual(
+            workspace.bonsplitController.selectedTab(inPane: paneId)?.id,
+            firstTabId,
+            "Cmd+Option+Right should cycle surfaces before moving pane focus"
+        )
+    }
+
     func testCmdDRoutesSplitToEventWindowWhenKeyWindowIsDifferent() {
         guard let appDelegate = AppDelegate.shared else {
             XCTFail("Expected AppDelegate.shared")
@@ -4379,7 +4565,10 @@ final class AppDelegateShortcutRoutingTests: XCTestCase {
             return
         }
 
-        withTemporaryShortcut(action: .nextSurface) {
+        withTemporaryShortcut(
+            action: .nextSurface,
+            shortcut: StoredShortcut(key: "]", command: true, shift: true, option: false, control: false)
+        ) {
             // Non-US layouts can report "*" (or other symbols) for kVK_ANSI_RightBracket with Shift.
             // Shortcut matching should still allow Cmd+Shift+] via keyCode fallback.
             let event = makeKeyEvent(

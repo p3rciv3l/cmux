@@ -7141,6 +7141,15 @@ struct ContentView: View {
                 when: { $0.bool(CommandPaletteContextKeys.browserDisabled) }
             )
         )
+        contributions.append(
+            CommandPaletteCommandContribution(
+                commandId: "palette.duplicateWorkspace",
+                title: constant(String(localized: "command.duplicateWorkspace.title", defaultValue: "Duplicate Workspace")),
+                subtitle: workspaceSubtitle,
+                keywords: ["duplicate", "workspace", "copy", "resume", "codex"],
+                when: { $0.bool(CommandPaletteContextKeys.hasWorkspace) }
+            )
+        )
         contributions.append(contentsOf: Self.commandPaletteSettingsToggleCommandContributions())
 
         contributions.append(
@@ -8244,6 +8253,9 @@ struct ContentView: View {
         }
         registerSettingsToggleCommandHandlers(&registry)
 
+        registry.register(commandId: "palette.duplicateWorkspace") {
+            Task { await tabManager.duplicateWorkspaces() }
+        }
         registry.register(commandId: "palette.renameWorkspace") {
             beginRenameWorkspaceFlow()
         }
@@ -16277,6 +16289,23 @@ struct TabItemView: View, Equatable {
             syncSelectionAfterMutation()
         }
         .disabled(contextMenuPinState == nil)
+
+        let duplicateButton = Button(contextMenuLabel(
+            multi: String(localized: "contextMenu.duplicateWorkspaces", defaultValue: "Duplicate Workspaces"),
+            single: String(localized: "contextMenu.duplicateWorkspace", defaultValue: "Duplicate Workspace"),
+            isMulti: isMulti
+        )) {
+            Task {
+                await tabManager.duplicateWorkspaces(targetIds)
+                syncSelectionAfterMutation()
+            }
+        }
+        let duplicateShortcut = KeyboardShortcutSettings.shortcut(for: .duplicateWorkspace)
+        if let key = duplicateShortcut.keyEquivalent {
+            duplicateButton.keyboardShortcut(key, modifiers: duplicateShortcut.eventModifiers)
+        } else {
+            duplicateButton
+        }
 
         workspaceGroupContextMenuSection(targetIds: targetIds, isMulti: isMulti)
 

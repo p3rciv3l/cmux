@@ -17,22 +17,24 @@ import Testing
 @MainActor
 struct WorkspaceTilingTests {
     @Test
-    func newWorkspaceStartsTiledAndNewSplitsBecomeMaster() throws {
+    func newWorkspacePreservesDirectionalSplits() throws {
         let workspace = Workspace(initialTerminalCommand: "/usr/bin/true")
         defer { dispose(workspace) }
         let controller = workspace.bonsplitController
-        #expect(controller.tilingLayout == .tile)
+        #expect(controller.tilingLayout == .manual)
         let original = try #require(workspace.focusedPanelId)
         let added = try #require(workspace.newTerminalSplit(
             from: original, orientation: .vertical, focus: false, initialCommand: "/usr/bin/true"
         ))
-        #expect(controller.allPaneIds.first == workspace.paneId(forPanelId: added.id))
+        #expect(controller.allPaneIds.first == workspace.paneId(forPanelId: original))
+        #expect(controller.allPaneIds.last == workspace.paneId(forPanelId: added.id))
+        #expect(controller.tilingLayout == .manual)
         #expect(controller.masterCount == 1)
         #expect(controller.masterRatio == 0.55)
     }
 
     @Test(arguments: [false, true])
-    func legacySessionEnablesTilingButNewExplicitManualChoiceSurvivesRestore(legacy: Bool) throws {
+    func manualLayoutSurvivesRestoreRegardlessOfLegacyMarker(legacy: Bool) throws {
         let workspace = try fixture()
         defer { dispose(workspace) }
         var snapshot = workspace.sessionSnapshot(includeScrollback: false)
@@ -43,7 +45,7 @@ struct WorkspaceTilingTests {
         let restored = Workspace(initialTerminalCommand: "/usr/bin/true")
         defer { dispose(restored) }
         _ = restored.restoreSessionSnapshot(decoded)
-        #expect(restored.bonsplitController.tilingLayout == (legacy ? .tile : .manual))
+        #expect(restored.bonsplitController.tilingLayout == .manual)
         #expect(restored.panels.count == workspace.panels.count)
         #expect(restored.sessionSnapshot(includeScrollback: false).tilingDefaultsVersion == 1)
     }
@@ -193,7 +195,7 @@ struct WorkspaceTilingTests {
     }
 
     @Test
-    func sessionRoundTripRestoresTilingPreferencesAndFocusedTerminal() throws {
+    func sessionRoundTripPreservesPanesWithoutReenablingTiling() throws {
         let workspace = try fixture()
         defer { dispose(workspace) }
         let controller = workspace.bonsplitController
@@ -211,13 +213,11 @@ struct WorkspaceTilingTests {
         defer { dispose(restored) }
         let panelMapping = restored.restoreSessionSnapshot(snapshot)
 
-        #expect(restored.bonsplitController.tilingLayout == .monocle)
-        #expect(restored.bonsplitController.masterCount == 2)
-        #expect(restored.bonsplitController.masterRatio == 0.5)
+        #expect(restored.bonsplitController.tilingLayout == .manual)
         #expect(restored.bonsplitController.allPaneIds.count == controller.allPaneIds.count)
         #expect(restored.panels.count == workspace.panels.count)
         #expect(restored.focusedPanelId == panelMapping[focusedPanel])
-        #expect(restored.bonsplitController.zoomedPaneId == restored.bonsplitController.focusedPaneId)
+        #expect(restored.bonsplitController.zoomedPaneId == nil)
         #expect(restored.performTilingAction(.toggleLayout))
         #expect(restored.bonsplitController.tilingLayout == .tile)
     }

@@ -261,7 +261,7 @@ extension Workspace {
 
     @discardableResult
     func restoreSessionSnapshot(_ snapshot: SessionWorkspaceSnapshot, forDuplication: Bool = false) -> [UUID: UUID] {
-        // Restore the saved split scaffold before applying its automatic layout policy.
+        // Restore the saved split scaffold with no automatic layout policy.
         _ = bonsplitController.performTilingAction(.manual)
         let previousSuppressClosedPanelHistory = suppressClosedPanelHistory
         suppressClosedPanelHistory = true
@@ -362,15 +362,8 @@ extension Workspace {
         } else {
             scheduleFocusReconcile()
         }
-        var tiling = snapshot.tiling ?? PaneTilingConfiguration(layout: .tile)
-        if snapshot.tilingDefaultsVersion == nil, tiling.layout == .manual {
-            tiling = PaneTilingConfiguration(
-                layout: .tile, masterCount: tiling.masterCount, masterRatio: tiling.masterRatio
-            )
-        }
-        if !bonsplitController.restoreTilingConfiguration(tiling) {
-            _ = bonsplitController.restoreTilingConfiguration(PaneTilingConfiguration(layout: .tile))
-        }
+        // Restore the saved split geometry without re-enabling a layout policy.
+        // Older builds persisted automatic tiling even when users had not requested it.
         let isWorkspaceManuallyUnread = snapshot.isManuallyUnread == true
         restoreWorkspaceManualUnread(isWorkspaceManuallyUnread)
         let restoredNotifications = restoredSessionNotifications(
@@ -11442,9 +11435,6 @@ final class Workspace: Identifiable, ObservableObject {
             }
             bonsplitController.selectTab(initialTabId)
         }
-        // All cmux workspaces start tiled; an explicit manual choice is persisted
-        // separately so session restoration never silently enables it again.
-        _ = bonsplitController.performTilingAction(.tile)
         tmuxLayoutSnapshot = bonsplitController.layoutSnapshot()
         scheduleExtensionSidebarProjectRootRefresh(for: currentDirectory)
 
